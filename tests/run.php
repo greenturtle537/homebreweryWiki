@@ -1,6 +1,6 @@
 <?php
 /**
- * Unit/smoke tests for the HomebreweryWiki extension (E1S1).
+ * Unit/smoke tests for the HomebreweryWiki extension (E1S1 + E1S2).
  *
  * Run under a MediaWiki 1.14.1 install, e.g.:
  *   php maintenance/hbwtest.php
@@ -76,6 +76,39 @@ t_assert( HomebreweryWiki::onArticleSave( $mainArt, $user, $badText2, $summary, 
 // a 2-line guard (return '' when isValidBrewText() is false, else the raw
 // text).  Exercising it here needs a live DB connection, which this CLI
 // context may not have, so it is intentionally not asserted in this suite.
+
+// --- E1S2: view-module enqueue decision (T1) ---
+// The module must load only for an ordinary view of a brew-namespace page:
+// never for non-brew pages, edit, history, preview (action=submit) or diffs.
+$brewTitle = Title::newFromText( 'Manual:Test' );
+$mainTitle = Title::newFromText( 'Main Page' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'view', null ) === true,
+    'E1S2 enqueue: brew view => load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $mainTitle, 'view', null ) === false,
+    'E1S2 enqueue: non-brew view => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'edit', null ) === false,
+    'E1S2 enqueue: edit => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'history', null ) === false,
+    'E1S2 enqueue: history => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'submit', null ) === false,
+    'E1S2 enqueue: preview (submit) => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'purge', null ) === false,
+    'E1S2 enqueue: purge => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'view', '5' ) === false,
+    'E1S2 enqueue: diff view => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueViewModule( null, 'view', null ) === false,
+    'E1S2 enqueue: null title => no load' );
+
+// --- E1S2: hidden source placeholder (T2) ---
+$ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
+t_assert( strpos( $ph, 'class="hbw-brew"' ) !== false, 'E1S2 placeholder: scoping wrapper present' );
+t_assert( strpos( $ph, 'id="hbw-source"' ) !== false, 'E1S2 placeholder: source id present' );
+t_assert( strpos( $ph, 'display:none' ) !== false, 'E1S2 placeholder: hidden' );
+t_assert( strpos( $ph, '&lt;b&gt;' ) !== false, 'E1S2 placeholder: < > escaped' );
+t_assert( strpos( $ph, '&amp;' ) !== false, 'E1S2 placeholder: ampersand escaped' );
+t_assert( strpos( $ph, '<b>' ) === false, 'E1S2 placeholder: no raw markup leaks' );
+t_assert( strpos( HomebreweryWiki::brewPlaceholder( '' ), 'id="hbw-source"' ) !== false,
+    'E1S2 placeholder: empty source still emits placeholder' );
 
 echo "\n$pass passed, $fail failed\n";
 exit( $fail > 0 ? 1 : 0 );

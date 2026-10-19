@@ -18,7 +18,16 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 }
 
 /** Extension version, surfaced on Special:Version. */
-define( 'HOMEBREWERYWIKI_VERSION', '0.1.0' );
+define( 'HOMEBREWERYWIKI_VERSION', '0.2.0' );
+
+/**
+ * Front-end view module (E1S2), relative to $wgScriptPath.
+ *
+ * Loaded on brew page views only.  The module reads the hidden source
+ * placeholder the server emits (see HomebreweryWiki::brewPlaceholder()) and
+ * places the saved markdown into the content pane as plain preformatted text.
+ */
+define( 'HOMEBREWERYWIKI_VIEW_MODULE', '/extensions/HomebreweryWiki/HomebreweryWiki.view.js' );
 
 /**
  * Extension credits (MediaWiki 1.14 shape).
@@ -84,6 +93,25 @@ $wgHooks['ArticleFromTitle'][] = 'HomebreweryWiki::onArticleFromTitle';
  * side is guarded in HomebreweryWiki_Article::getBrewText().
  */
 $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
+
+/**
+ * Brew pane display (E1S2 - "show saved markdown as plain preformatted text").
+ *
+ * Both hooks are 1.14-signature (no $context / no OutputPage arg on the
+ * article hook):
+ *
+ * - ArticleViewHeader, fired from Article::view() only, with
+ *   ( &$article, &$outputDone, &$pcache ).  Setting $outputDone suppresses the
+ *   stock wikitext parse so we can emit the raw brew source into a hidden
+ *   placeholder instead of a mangled parse.  Diffs (DifferenceEngine) and
+ *   action=raw return before this hook, so they stay untouched.
+ *
+ * - BeforePageDisplay, fired from OutputPage::output(), with ( &$out, &$sk ).
+ *   Used to load the view module for brew page views only (legacy
+ *   addScriptFile; 1.14 has no ResourceLoader).
+ */
+$wgHooks['ArticleViewHeader'][] = 'HomebreweryWiki::onArticleViewHeader';
+$wgHooks['BeforePageDisplay'][] = 'HomebreweryWiki::onBeforePageDisplay';
 
 /**
  * Run once MediaWiki is fully initialised (the 1.14 idiom).  The callback is
