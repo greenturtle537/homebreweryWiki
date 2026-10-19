@@ -200,6 +200,13 @@ class HomebreweryWiki {
      * (and to no-JS crawlers) but never flashed to the reader; the module builds
      * the visible <pre> from it and drops the placeholder.
      *
+     * The hidden container is a <div>, not a <pre>: the HTML parser strips one
+     * newline immediately after a <pre> start tag, which would eat a leading
+     * newline in the saved source.  A <div> text node round-trips exactly.
+     * The <noscript> block renders the escaped source for readers with JS off;
+     * its <pre> deliberately starts with a sacrificial newline so the parser
+     * strips that one instead of a real leading newline.
+     *
      * @param mixed $text Raw brew markdown.
      * @return string HTML fragment.
      */
@@ -209,8 +216,11 @@ class HomebreweryWiki {
         }
         $escaped = htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
         return "<div class=\"hbw-brew\" id=\"hbw-brew\">"
-             . "<pre class=\"hbw-source\" id=\"hbw-source\" style=\"display:none\">"
+             . "<div class=\"hbw-source\" id=\"hbw-source\" style=\"display:none\">"
              . $escaped
-             . "</pre></div>\n";
+             . "</div>"
+             . "<noscript><pre class=\"hbw-brew-text\">\n"
+             . $escaped
+             . "</pre></noscript></div>\n";
     }
 }

@@ -104,11 +104,30 @@ $ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
 t_assert( strpos( $ph, 'class="hbw-brew"' ) !== false, 'E1S2 placeholder: scoping wrapper present' );
 t_assert( strpos( $ph, 'id="hbw-source"' ) !== false, 'E1S2 placeholder: source id present' );
 t_assert( strpos( $ph, 'display:none' ) !== false, 'E1S2 placeholder: hidden' );
+t_assert( strpos( $ph, '<div class="hbw-source"' ) !== false,
+    'E1S2 placeholder: source is a div (leading newline survives parsing)' );
+t_assert( strpos( $ph, '<pre class="hbw-source"' ) === false,
+    'E1S2 placeholder: source is not a pre' );
 t_assert( strpos( $ph, '&lt;b&gt;' ) !== false, 'E1S2 placeholder: < > escaped' );
 t_assert( strpos( $ph, '&amp;' ) !== false, 'E1S2 placeholder: ampersand escaped' );
 t_assert( strpos( $ph, '<b>' ) === false, 'E1S2 placeholder: no raw markup leaks' );
 t_assert( strpos( HomebreweryWiki::brewPlaceholder( '' ), 'id="hbw-source"' ) !== false,
     'E1S2 placeholder: empty source still emits placeholder' );
+
+// Leading newline must be carried verbatim in the hidden div.
+$ph_nl = HomebreweryWiki::brewPlaceholder( "\n= Title =" );
+t_assert( strpos( $ph_nl, "style=\"display:none\">\n= Title =</div>" ) !== false,
+    'E1S2 placeholder: leading newline preserved in source div' );
+
+// No-JS fallback: visible escaped <pre> inside <noscript>, with a sacrificial
+// newline directly after the start tag (the parser strips that one, not ours).
+t_assert( strpos( $ph, '<noscript><pre class="hbw-brew-text">' . "\n" ) !== false,
+    'E1S2 placeholder: noscript fallback present with sacrificial newline' );
+t_assert( strpos( $ph, '</pre></noscript>' ) !== false,
+    'E1S2 placeholder: noscript fallback is escaped preformatted text' );
+$ph_nl2 = HomebreweryWiki::brewPlaceholder( "\n= Title =" );
+t_assert( strpos( $ph_nl2, '<noscript><pre class="hbw-brew-text">' . "\n\n= Title =" ) !== false,
+    'E1S2 placeholder: noscript keeps a real leading newline' );
 
 echo "\n$pass passed, $fail failed\n";
 exit( $fail > 0 ? 1 : 0 );

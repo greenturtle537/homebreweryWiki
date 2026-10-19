@@ -54,14 +54,25 @@ before the Homebrewery renderer lands):
 - `HomebreweryWiki_Article` is returned from `ArticleFromTitle` (E1S1).
 - `ArticleViewHeader` (`HomebreweryWiki::onArticleViewHeader`) emits, for the
   current revision of an existing brew page, the hidden wrapper
-  `<div class="hbw-brew"><pre id="hbw-source" style="display:none">…</pre></div>`
+  `<div class="hbw-brew"><div id="hbw-source" style="display:none">…</div>
+  <noscript><pre class="hbw-brew-text">…</pre></noscript></div>`
   and sets `$outputDone` so the markdown is never run through the wikitext parser.
+  The hidden source is a `<div>` (not a `<pre>`) so a leading newline survives
+  HTML parsing; the `<noscript>` block is the visible fallback when JavaScript
+  is disabled or the module fails to load.
 - `BeforePageDisplay` (`HomebreweryWiki::onBeforePageDisplay`) loads
   `HomebreweryWiki.view.js` **only** on a brew page view — not on edit, history,
   preview or diff screens, and not on non-brew pages (MW 1.14 has no
   `ResourceLoader`; legacy `addScriptFile` is used).
 - `HomebreweryWiki.view.js` reads `#hbw-source` and builds the visible
   `<pre class="hbw-brew-text">` inside the `.hbw-brew` wrapper.
+
+**Deployment note (file cache):** if the target wiki sets `$wgUseFileCache`, an
+entry created before this change can still hold parsed wikitext (freshness is
+`page_touched`/`$wgCacheEpoch` based). Bump `$wgCacheEpoch` or purge the file
+cache when deploying, so stale entries are not served. Do not permanently
+exclude brew pages via `IsFileCacheable`; the escaped placeholder and module
+output are cache-safe.
 
 Diffs and `action=raw` are unaffected: they return before `ArticleViewHeader`.
 

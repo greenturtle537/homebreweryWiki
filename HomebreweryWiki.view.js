@@ -7,9 +7,10 @@
  *
  * Contract:
  *   - The server (HomebreweryWiki_Article view path) emits the raw source into
- *     a hidden placeholder: <pre id="hbw-source"> ...escaped markdown... </pre>
+ *     a hidden placeholder: <div id="hbw-source"> ...escaped markdown... </div>
  *     inside the `.hbw-brew` wrapper, and loads this file only on the view of a
- *     brew-namespace page.
+ *     brew-namespace page.  (A <div>, not a <pre>, so a leading newline in the
+ *     source survives HTML parsing; this module reads textContent verbatim.)
  *   - This module reads that source, builds the visible <pre class="hbw-brew-text">,
  *     drops it into the wrapper, and removes the hidden placeholder.
  *
