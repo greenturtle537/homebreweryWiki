@@ -14,6 +14,9 @@ Source is PHP 5.2 compatible: no namespaces, closures, short array syntax,
 `__DIR__`, or late static binding. MediaWiki 1.14 has no `extension.json`,
 `ContentHandler`, or `ResourceLoader`.
 
+Front-end JavaScript targets **ES5** (desktop only): no `let`/`const`, arrow
+functions, template literals, classes, or ES modules.
+
 ## Install
 
 1. Copy this directory to `$IP/extensions/HomebreweryWiki/`.
