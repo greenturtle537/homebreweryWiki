@@ -94,4 +94,133 @@ class HomebreweryWiki {
         // preg_match() returns false on malformed UTF-8, 1 otherwise.
         return ( preg_match( '//u', $text ) === 1 );
     }
+
+    /**
+     * Whether the brew view module must load for this request (E1S2T1).
+     *
+     * Kept a pure predicate so the enqueue rule is unit-testable without an
+     * OutputPage or a live request.  The module loads only for an ordinary
+     * *view* of a brew-namespace page: edit, history, preview (action=submit),
+     * purge, diffs, and every non-brew page are excluded.
+     *
+     * @param Title|mixed $title  Page title (or anything; non-Title => false).
+     * @param string      $action Requested action, e.g. 'view', 'edit'.
+     * @param mixed       $diff   Raw 'diff' request value (null when absent).
+     * @return bool
+     */
+    public static function shouldEnqueueViewModule( $title, $action, $diff ) {
+        if ( !( $title instanceof Title ) ) {
+            return false;
+        }
+        if ( $title->getNamespace() !== NS_MANUAL ) {
+            return false;
+        }
+        if ( $action !== 'view' ) {
+            return false;
+        }
+        if ( $diff !== null ) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * BeforePageDisplay hook.  Loads the brew view module for brew page views
+     * only (E1S2T1).  Non-brew pages, edit/history/preview screens and diffs
+     * receive no brew module, so nothing outside a brew view is affected.
+     *
+     * MediaWiki 1.14 signature: ( &$out, &$sk ).
+     *
+     * @param OutputPage &$out
+     * @param Skin       &$sk
+     * @return bool Always true so other handlers keep running.
+     */
+    public static function onBeforePageDisplay( &$out, &$sk ) {
+        global $wgRequest, $wgScriptPath, $wgTitle;
+
+        // 1.14 OutputPage has no getTitle(); the current Title is the $wgTitle
+        // global (it is null/absent on some request types, which we treat as
+        // "not a brew view").
+        $title  = $wgTitle;
+        $action = $wgRequest->getVal( 'action', 'view' );
+        $diff   = $wgRequest->getVal( 'diff' );
+
+        if ( ! self::shouldEnqueueViewModule( $title, $action, $diff ) ) {
+            return true;
+        }
+
+        $out->addScriptFile( $wgScriptPath . HOMEBREWERYWIKI_VIEW_MODULE );
+        return true;
+    }
+
+    /**
+     * ArticleViewHeader hook.  For a current revision of an existing brew page,
+     * emit the raw brew source into a hidden placeholder and suppress the stock
+     * wikitext parse (E1S2, "no raw-markdown flash" - D9).  The view module then
+     * reveals it as plain preformatted text.
+     *
+     * MediaWiki 1.14 signature: ( &$article, &$outputDone, &$pcache ).  This
+     * hook fires from Article::view() only, so diffs (and action=raw) never
+     * reach it.
+     *
+     * @param Article &$article    Article being viewed.
+     * @param bool    &$outputDone Set true to skip the stock content output.
+     * @param bool    &$pcache     Cleared so no parser-cache entry is written.
+     * @return bool Always true.
+     */
+    public static function onArticleViewHeader( &$article, &$outputDone, &$pcache ) {
+        if ( !( $article instanceof HomebreweryWiki_Article ) ) {
+            return true;
+        }
+
+        $title = $article->getTitle();
+        // Non-existent pages keep the stock "no article" screen; read-access
+        // checks stay with core (never bypass userCanRead()).
+        if ( ! $title->exists() || ! $title->userCanRead() ) {
+            return true;
+        }
+        // Old revisions keep the stock path for this slice.
+        if ( $article->getOldID() !== 0 ) {
+            return true;
+        }
+
+        $outputDone = true;
+        $pcache     = false;
+
+        global $wgOut;
+        $wgOut->addHTML( self::brewPlaceholder( $article->getBrewText() ) );
+        return true;
+    }
+
+    /**
+     * Build the hidden source placeholder the view module consumes (E1S2T2).
+     *
+     * The wrapper carries the single scoping class `.hbw-brew` (Q25).  The raw
+     * brew source is HTML-escaped and hidden, so it is available to the module
+     * (and to no-JS crawlers) but never flashed to the reader; the module builds
+     * the visible <pre> from it and drops the placeholder.
+     *
+     * The hidden container is a <div>, not a <pre>: the HTML parser strips one
+     * newline immediately after a <pre> start tag, which would eat a leading
+     * newline in the saved source.  A <div> text node round-trips exactly.
+     * The <noscript> block renders the escaped source for readers with JS off;
+     * its <pre> deliberately starts with a sacrificial newline so the parser
+     * strips that one instead of a real leading newline.
+     *
+     * @param mixed $text Raw brew markdown.
+     * @return string HTML fragment.
+     */
+    public static function brewPlaceholder( $text ) {
+        if ( !is_string( $text ) ) {
+            $text = '';
+        }
+        $escaped = htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+        return "<div class=\"hbw-brew\" id=\"hbw-brew\">"
+             . "<div class=\"hbw-source\" id=\"hbw-source\" style=\"display:none\">"
+             . $escaped
+             . "</div>"
+             . "<noscript><pre class=\"hbw-brew-text\">\n"
+             . $escaped
+             . "</pre></noscript></div>\n";
+    }
 }

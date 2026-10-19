@@ -14,6 +14,9 @@ Source is PHP 5.2 compatible: no namespaces, closures, short array syntax,
 `__DIR__`, or late static binding. MediaWiki 1.14 has no `extension.json`,
 `ContentHandler`, or `ResourceLoader`.
 
+Front-end JavaScript targets **ES5** (desktop only): no `let`/`const`, arrow
+functions, template literals, classes, or ES modules.
+
 ## Install
 
 1. Copy this directory to `$IP/extensions/HomebreweryWiki/`.
@@ -41,6 +44,39 @@ cp tests/run.php <mediawiki>/maintenance/hbwtest.php
 php maintenance/hbwtest.php
 ```
 
+## Brew page rendering (E1S2)
+
+On a brew page **view** the server skips the stock wikitext parse and emits the
+raw source into a hidden placeholder; a small front-end module then places it
+into the content pane as plain preformatted text (a proof of the pane plumbing
+before the Homebrewery renderer lands):
+
+- `HomebreweryWiki_Article` is returned from `ArticleFromTitle` (E1S1).
+- `ArticleViewHeader` (`HomebreweryWiki::onArticleViewHeader`) emits, for the
+  current revision of an existing brew page, the hidden wrapper
+  `<div class="hbw-brew"><div id="hbw-source" style="display:none">…</div>
+  <noscript><pre class="hbw-brew-text">…</pre></noscript></div>`
+  and sets `$outputDone` so the markdown is never run through the wikitext parser.
+  The hidden source is a `<div>` (not a `<pre>`) so a leading newline survives
+  HTML parsing; the `<noscript>` block shows the escaped source when JavaScript
+  is disabled. It does **not** cover a module load failure while scripting is
+  still enabled — the module remains required to reveal the pane.
+- `BeforePageDisplay` (`HomebreweryWiki::onBeforePageDisplay`) loads
+  `HomebreweryWiki.view.js` **only** on a brew page view — not on edit, history,
+  preview or diff screens, and not on non-brew pages (MW 1.14 has no
+  `ResourceLoader`; legacy `addScriptFile` is used).
+- `HomebreweryWiki.view.js` reads `#hbw-source` and builds the visible
+  `<pre class="hbw-brew-text">` inside the `.hbw-brew` wrapper.
+
+**Deployment note (file cache):** if the target wiki sets `$wgUseFileCache`, an
+entry created before this change can still hold parsed wikitext (freshness is
+`page_touched`/`$wgCacheEpoch` based). Bump `$wgCacheEpoch` or purge the file
+cache when deploying, so stale entries are not served. Do not permanently
+exclude brew pages via `IsFileCacheable`; the escaped placeholder and module
+output are cache-safe.
+
+Diffs and `action=raw` are unaffected: they return before `ArticleViewHeader`.
+
 ## Authoring rules
 
 - Brew pages contain Homebrewery markdown only. No wikitext, templates, or
@@ -49,4 +85,5 @@ php maintenance/hbwtest.php
 
 ## Status
 
-Early skeleton (Epic E1, story E1S1). See the project design docs for details.
+Walking skeleton (Epic E1): E1S1 (namespace + content type) and E1S2 (plain
+preformatted display in the pane) done. See the project design docs for details.
