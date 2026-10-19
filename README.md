@@ -58,8 +58,9 @@ before the Homebrewery renderer lands):
   <noscript><pre class="hbw-brew-text">…</pre></noscript></div>`
   and sets `$outputDone` so the markdown is never run through the wikitext parser.
   The hidden source is a `<div>` (not a `<pre>`) so a leading newline survives
-  HTML parsing; the `<noscript>` block is the visible fallback when JavaScript
-  is disabled or the module fails to load.
+  HTML parsing; the `<noscript>` block shows the escaped source when JavaScript
+  is disabled. It does **not** cover a module load failure while scripting is
+  still enabled — the module remains required to reveal the pane.
 - `BeforePageDisplay` (`HomebreweryWiki::onBeforePageDisplay`) loads
   `HomebreweryWiki.view.js` **only** on a brew page view — not on edit, history,
   preview or diff screens, and not on non-brew pages (MW 1.14 has no
