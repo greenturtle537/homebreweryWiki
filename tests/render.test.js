@@ -1083,6 +1083,37 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'odd labels: no console errors' );
 }() );
 
+// --- E3S3 review: code before prose, tagged fences, inline code ---
+( function () {
+    var source = '```markdown\n[^a]: inside a tagged fence\n```\n\n'
+        + 'Real prose cites alpha.[^b]\n\n'
+        + 'Inline `code [^c]` stays literal.\n\n'
+        + '[^a]: the fence note.\n\n'
+        + '[^b]: the alpha note.\n\n'
+        + '[^c]: inline code is not a reference.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 1, 'code skipping: only the prose reference links' );
+    ok( refs.length === 1 &&
+        refs[0].getAttribute( 'href' ) === '#hbw-fn-1-b',
+        'code skipping: the prose marker keeps its note, not the fence one' );
+    ok( notes.length === 1 &&
+        notes[0].getAttribute( 'id' ) === 'hbw-fn-1-b' &&
+        notes[0].textContent.indexOf( 'alpha' ) !== -1,
+        'code skipping: one note, the right one' );
+    ok( text.indexOf( '[^a]: inside a tagged fence' ) !== -1,
+        'code skipping: tagged fence content renders untouched' );
+    ok( text.indexOf( 'code [^c]' ) !== -1,
+        'code skipping: inline code renders untouched' );
+    ok( text.indexOf( '[^b]: the alpha note' ) === -1,
+        'code skipping: the real definition never renders as body text' );
+    ok( page.errors.length === 0, 'code skipping: no console errors' );
+}() );
+
 // --- E3S3 review: definitions inside fenced code are sample text, not notes ---
 ( function () {
     var source = 'Before the fence.[^demo]\n\n'
@@ -1100,6 +1131,170 @@ function offOriginFetches( win, root ) {
     ok( text.indexOf( '[^demo]: example' ) !== -1,
         'fenced definitions: fenced text renders untouched' );
     ok( page.errors.length === 0, 'fenced definitions: no console errors' );
+}() );
+
+// --- E3B1 review: every span on a line is code, not just the first ---
+( function () {
+    var source = 'Text `a` and `[^b]` here, prose cites beta.[^b]\n\n'
+        + '[^b]: beta note.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-b',
+        'two spans: only the prose reference links' );
+    ok( notes.length === 1, 'two spans: one note emitted' );
+    ok( text.indexOf( '[^b]' ) !== -1,
+        'two spans: the code span renders its brackets literally' );
+    ok( text.indexOf( 'hbw-footnote-mark' ) === -1,
+        'two spans: no marker leaked as code text' );
+    ok( page.errors.length === 0, 'two spans: no console errors' );
+}() );
+
+// --- E3B1 review: a double-backtick span is one span, not two ---
+( function () {
+    var source = 'Has ``a ` [^b]`` span, prose cites beta.[^b]\n\n'
+        + '[^b]: beta note.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-b',
+        'double backticks: only the prose reference links' );
+    ok( notes.length === 1, 'double backticks: one note emitted' );
+    ok( page.errors.length === 0, 'double backticks: no console errors' );
+}() );
+
+// --- E3B1 follow-up: a marker the renderer destroys must not shift pairing ---
+( function () {
+    var source = 'Prose cites one.[^one]\n\n'
+        + '    indented code cites two[^two]\n\n'
+        + 'Prose cites three.[^three]\n\n'
+        + '[^one]: note one.\n\n'
+        + '[^two]: note two.\n\n'
+        + '[^three]: note three.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+
+    // The renderer escapes the indented line's marker into <pre><code>
+    // text, so two links survive; ordinal pairing keeps three -> three
+    // instead of three -> two.
+    ok( refs.length === 2, 'destroyed marker: two references link' );
+    ok( refs.length === 2 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-one',
+        'destroyed marker: first link keeps its label' );
+    ok( refs.length === 2 && refs[ 1 ].getAttribute( 'href' ) === '#hbw-fn-1-three',
+        'destroyed marker: later link keeps its label, not the shifted one' );
+    ok( notes.length === 3, 'destroyed marker: all three notes are still listed' );
+    ok( page.errors.length === 0, 'destroyed marker: no console errors' );
+}() );
+
+// --- E3B1: a definition may contain inline code without losing its body ---
+( function () {
+    var source = 'Cites alpha.[^a]\n\n'
+        + '[^a]: uses `code` inline.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+
+    ok( refs.length === 1 && refs[0].getAttribute( 'href' ) === '#hbw-fn-1-a',
+        'code in note: prose reference links its note' );
+    ok( notes.length === 1, 'code in note: one note emitted' );
+    ok( notes.length === 1 && notes[0].textContent.indexOf( 'uses' ) !== -1 &&
+        notes[0].textContent.indexOf( 'code' ) !== -1,
+        'code in note: note body keeps prose and code text' );
+    ok( page.errors.length === 0, 'code in note: no console errors' );
+}() );
+
+// --- E3B1: an unclosed fence runs to the end of the page ---
+( function () {
+    var source = 'Before.[^a]\n\n'
+        + '```\n'
+        + 'still code [^b]\n'
+        + '[^b]: not a note\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 0, 'unclosed fence: no reference in prose, so none links' );
+    ok( notes.length === 0, 'unclosed fence: code definition is not a note' );
+    ok( text.indexOf( 'still code [^b]' ) !== -1,
+        'unclosed fence: code body renders' );
+    // The pinned renderer itself drops a trailing definition-shaped line in
+    // an unclosed fence at EOF; a closed fence keeps it (covered above).
+    ok( page.errors.length === 0, 'unclosed fence: no console errors' );
+}() );
+
+// --- E3B1 follow-up: a fence inside a note stays in the note ---
+( function () {
+    var source = 'Prose cites alpha.[^a]\n\n'
+        + '[^a]: see this\n'
+        + '  ```\n'
+        + '  code sample\n'
+        + '  ```\n'
+        + '  more text\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var columns = rendered ? rendered.querySelectorAll( '.hbw-column pre' ) : [];
+    var noteHtml = notes.length ? notes[ 0 ].innerHTML : '';
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-a',
+        'note fence: prose reference links its note' );
+    ok( notes.length === 1, 'note fence: one note emitted' );
+    ok( notes.length === 1 &&
+        notes[ 0 ].textContent.indexOf( 'see this' ) !== -1 &&
+        notes[ 0 ].textContent.indexOf( 'code sample' ) !== -1 &&
+        notes[ 0 ].textContent.indexOf( 'more text' ) !== -1,
+        'note fence: the whole block and its text live in the note' );
+    ok( columns.length === 0, 'note fence: no stray code block in the page body' );
+    ok( noteHtml.indexOf( 'pre' ) !== -1,
+        'note fence: the code sample renders as code inside the note' );
+    ok( page.errors.length === 0, 'note fence: no console errors' );
+}() );
+
+// --- E3B1 follow-up: an unindented fence closes the note ---
+( function () {
+    var source = 'Prose cites alpha.[^a]\n\n'
+        + '[^a]: a note\n\n'
+        + '```js\n'
+        + 'page code\n'
+        + '```\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var bodyPre = rendered ? rendered.querySelectorAll( '.hbw-column pre' ) : [];
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-a',
+        'unindented fence: prose reference links its note' );
+    ok( notes.length === 1 && notes[ 0 ].textContent.indexOf( 'a note' ) !== -1,
+        'unindented fence: the note keeps its own body' );
+    ok( notes.length === 1 && notes[ 0 ].textContent.indexOf( 'page code' ) === -1,
+        'unindented fence: the page fence does not join the note' );
+    ok( bodyPre.length === 1 && bodyPre[ 0 ].textContent.indexOf( 'page code' ) !== -1,
+        'unindented fence: the fence stays in the page body' );
+    ok( page.errors.length === 0, 'unindented fence: no console errors' );
+}() );
+
+// --- E3S3 T2: data-* hygiene on the hardened tree ---
+( function () {
+    var source = '<div data-evil="1" data-hbw-footnote="kept">content</div>\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var divs = rendered ? rendered.querySelectorAll( 'div[data-evil]' ) : [];
+
+    ok( !!rendered, 'data hygiene: content rendered' );
+    ok( divs.length === 0, 'data hygiene: author data-* attributes are stripped' );
+    ok( page.errors.length === 0, 'data hygiene: no console errors' );
 }() );
 
 // --- ES5 floor (Q19): module source stays ES5 ---

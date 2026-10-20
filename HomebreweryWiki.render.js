@@ -104,6 +104,10 @@
             'srcdoc', 'formaction', 'poster', 'srcset', 'background',
             'ping', 'dynsrc', 'lowsrc'
         ],
+        // Author data-* attributes carry no value for readers and are
+        // stripped.  Footnote markers are recognised by their CSS class-name
+        // instead, so no generated attribute has to survive sanitizing
+        // (E3S3T3).
         ALLOW_DATA_ATTR: false
     };
 
@@ -362,7 +366,6 @@
         var box = document.createElement( 'div' );
         box.innerHTML = clean;
         hardenTree( box );
-        box.innerHTML = restoreFencedMarkers( box.innerHTML );
         return box.innerHTML;
     }
 
@@ -416,36 +419,61 @@
     }
 
     /**
-     * Footnote fenced-code marker: an empty, content-free marker span never
-     * flows inside a code fence from our own pipeline, so a span-looking
-     * string inside `<pre><code>` is author text, not a marker.
+     * Create a stateful prose/code walker over one page source (E3S3 review).
      *
-     * @type {RegExp}
+     * Each `next()` returns `{ prose: boolean, text: string }` in source
+     * order: prose runs (split at inline backtick spans), fenced blocks, and
+     * the code spans themselves.  Fences open on up-to-3-spaces plus 3+
+     * backticks/tildes and close on a same-character run of at least the
+     * opening length; unclosed fences run to the end of the page, and an
+     * unmatched backtick leaves the rest of its line as prose.
+     *
+     * @param {string} pageSource page source
+     * @return {Object} walker with a `next()` method
      */
-    var FENCED_MARKER = /<pre><code>((?:(?!<\/code>)[\s\S])*?)<\/code><\/pre>/g;
+    function createProseWalker( pageSource ) {
+        var lines = String( pageSource ).split( '\n' );
+        var index = 0;
+        var fenceChar = null;
+        var fenceLength = 0;
 
-    /**
-     * Strip marker spans that ended up inside fenced code (E3S3 review).
-     *
-     * `markFootnoteRefs` runs on the bare source, so it cannot know which
-     * `[^label]` sit inside a fence; the renderer then turns those spans
-     * into literal code text.  This pass restores the original reference
-     * text inside `<pre><code>` only, so code samples stay byte-identical
-     * while real references elsewhere keep linking.  `[^demo]` becomes the
-     * literal text again; the rest of the fence is untouched.
-     *
-     * @param {string} html rendered HTML
-     * @return {string} HTML with fence markers restored to source text
-     */
-    function restoreFencedMarkers( html ) {
-        return String( html ).replace( FENCED_MARKER, function ( whole, code ) {
-            return '<pre><code>' +
-                code.replace(
-                    /&lt;span class="hbw-footnote-mark" data-hbw-footnote="([^"&]+)"&gt;&lt;\/span&gt;/g,
-                    '[^$1]'
-                ) +
-                '</code></pre>';
-        } );
+        function isFenceClose( line ) {
+            return new RegExp(
+                '^ {0,3}' + fenceChar + '{' + fenceLength + ',}[ \\t]*$'
+            ).test( line );
+        }
+
+        function isFenceOpen( line ) {
+            var found = /^ {0,3}(`{3,}|~{3,})/.exec( line );
+            if ( found ) {
+                fenceChar = found[ 1 ].charAt( 0 );
+                fenceLength = found[ 1 ].length;
+                return true;
+            }
+            return false;
+        }
+
+        return {
+            next: function () {
+                var line;
+                if ( index >= lines.length ) {
+                    return null;
+                }
+                line = lines[ index ];
+                index++;
+                if ( fenceChar !== null ) {
+                    if ( isFenceClose( line ) ) {
+                        fenceChar = null;
+                        fenceLength = 0;
+                    }
+                    return { prose: false, text: line + ( index < lines.length ? '\n' : '' ) };
+                }
+                if ( isFenceOpen( line ) ) {
+                    return { prose: false, text: line + ( index < lines.length ? '\n' : '' ) };
+                }
+                return { prose: true, text: line + ( index < lines.length ? '\n' : '' ) };
+            }
+        };
     }
 
     /**
@@ -461,9 +489,13 @@
     /**
      * Footnote reference (`[^label]`) inside source text.
      *
+     * Matches the literal text form only: once a reference has been swapped
+     * for a marker span the brackets are gone, so a global scan can never
+     * match its own output (which would loop forever).
+     *
      * @type {RegExp}
      */
-    var FOOTNOTE_REF = /\[\^([^\]\s]+)\]/g;
+    var FOOTNOTE_REF = /\[\^([^\]\s<>]+)\]/g;
 
     /**
      * Footnote definition line (`[^label]: note text`), the definition's
@@ -474,15 +506,108 @@
     var FOOTNOTE_DEF_LINE = /^[ \t]*\[\^([^\]\s]+)\][ \t]*:[ \t]*(.*)$/;
 
     /**
-     * Strip footnote definitions from one page source (E3S3T3).
+     * Blank out inline code spans so they cannot look like footnote syntax.
      *
-     * Definitions live brew-wide: a definition found on any page resolves
+     * The replacement keeps one character per source character, so match
+     * offsets stay valid against the unmasked line; only the characters
+     * between a pair of backticks are replaced.  The closing run must be the
+     * same length as the opening run, so `` ``a `b` `` `` is one span and
+     * every span on a line is masked, not just the first.  An unmatched
+     * backtick is ordinary prose, matching the walker's rule.
+     *
+     * @param {string} line source line
+     * @return {string} line with code spans masked by NUL characters
+     */
+    function maskInlineCode( line ) {
+        var text = String( line );
+        var chars = text.split( '' );
+        var i = 0;
+        var open;
+        var close;
+        var run;
+        var j;
+        var k;
+        var c;
+
+        while ( i < text.length ) {
+            if ( text.charAt( i ) !== '`' ) {
+                i++;
+                continue;
+            }
+            open = i;
+            while ( i < text.length && text.charAt( i ) === '`' ) {
+                i++;
+            }
+            run = i - open;
+
+            // CommonMark matches the closing run by length: a one-backtick
+            // opener is not closed by two backticks, and vice versa.
+            close = -1;
+            j = i;
+            while ( j < text.length ) {
+                if ( text.charAt( j ) !== '`' ) {
+                    j++;
+                    continue;
+                }
+                k = j;
+                while ( k < text.length && text.charAt( k ) === '`' ) {
+                    k++;
+                }
+                if ( k - j === run ) {
+                    close = k;
+                    break;
+                }
+                j = k;
+            }
+            if ( close === -1 ) {
+                // Unmatched opener: ordinary prose; keep scanning after it.
+                continue;
+            }
+            for ( c = open; c < close; c++ ) {
+                chars[ c ] = '\u0000';
+            }
+            i = close;
+        }
+        return chars.join( '' );
+    }
+
+    /**
+     * Defined footnote references in one prose line, outside inline code.
+     *
+     * @param {string} line prose line (fences never reach here)
+     * @param {Object.<string, string>} notes footnote bodies by label
+     * @return {Array.<Object>} `{ index, length, label }` in source order
+     */
+    function findFootnoteRefs( line, notes ) {
+        var masked = maskInlineCode( line );
+        var found = [];
+        var match;
+        FOOTNOTE_REF.lastIndex = 0;
+        while ( ( match = FOOTNOTE_REF.exec( masked ) ) !== null ) {
+            if ( notes.hasOwnProperty( match[ 1 ] ) ) {
+                found.push( {
+                    index: match.index,
+                    length: match[ 0 ].length,
+                    label: match[ 1 ]
+                } );
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Strip footnote definitions from every page source (E3S3T3 / E3B1).
+     *
+     * Definitions live brew-wide: a definition on any page resolves
      * references on any page, matching how readers follow a brew.  Definition
-     * lines (and their indented continuations) are removed up front because
+     * lines and their indented continuations are removed up front because
      * the pinned renderer would otherwise rewrite `[^label]` text into its
-     * own superscript spans before this extension ever sees them.  Note
-     * bodies stay verbatim so bold, links and tables still apply inside the
-     * notes.
+     * own superscript spans before this extension ever sees them.  Bodies
+     * stay verbatim so bold, links and tables still apply inside the notes.
+     *
+     * One pass over the prose walker: fenced blocks never reach the scanner,
+     * inline code is masked per line, so no code sample can donate a note
+     * body or have its `[^label]` stripped (E3B1).
      *
      * @param {Array.<string>} pages page sources
      * @return {{ pages: Array.<string>, notes: Object.<string, string> }}
@@ -490,59 +615,109 @@
     function extractFootnotes( pages ) {
         var notes = {};
         var cleaned = [];
-        var lines;
         var kept;
+        var walker;
+        var step;
+        var line;
+        var masked;
+        var match;
+        var offset;
+        var openMatch;
         var current;
+        var noteFence;
         var fenceChar;
         var fenceLength;
-        var fence;
-        var match;
         var p;
-        var i;
 
         for ( p = 0; p < pages.length; p++ ) {
-            lines = String( pages[ p ] ).split( /\r\n|\r|\n/ );
             kept = [];
             current = null;
+            noteFence = false;
             fenceChar = null;
             fenceLength = 0;
-            for ( i = 0; i < lines.length; i++ ) {
-                if ( current !== null &&
-                    ( /^[ \t]+/.test( lines[ i ] ) || lines[ i ] === '' ) ) {
-                    notes[ current ] += '\n' + lines[ i ];
+            walker = createProseWalker( pages[ p ] );
+
+            while ( ( step = walker.next() ) !== null ) {
+                if ( !step.prose ) {
+                    line = step.text.replace( /\n$/, '' );
+
+                    if ( fenceChar === null ) {
+                        // The walker only marks a line as code when it opens
+                        // a fence, so this is an opening fence line.
+                        openMatch = /^ {0,3}(`{3,}|~{3,})/.exec( line );
+                        if ( openMatch ) {
+                            fenceChar = openMatch[ 1 ].charAt( 0 );
+                            fenceLength = openMatch[ 1 ].length;
+                            if ( current !== null && /^[ \t]/.test( line ) ) {
+                                // Only an indented fence is a lazy
+                                // continuation of the note and belongs to it
+                                // (E3B1 follow-up).  An unindented fence is
+                                // not: it closes the note, as in CommonMark.
+                                noteFence = true;
+                                notes[ current ] += '\n' + line;
+                                continue;
+                            }
+                            current = null;
+                            noteFence = false;
+                        }
+                        kept.push( step.text );
+                        continue;
+                    }
+
+                    if ( new RegExp( '^ {0,3}' + fenceChar +
+                            '{' + fenceLength + ',}[ \\t]*$' ).test( line ) ) {
+                        // Closing fence: hand it to the note when the fence
+                        // opened inside it, otherwise it is page content.
+                        fenceChar = null;
+                        fenceLength = 0;
+                        if ( current !== null && noteFence ) {
+                            notes[ current ] += '\n' + line;
+                            noteFence = false;
+                            continue;
+                        }
+                        current = null;
+                        noteFence = false;
+                        kept.push( step.text );
+                        continue;
+                    }
+
+                    // Interior fence line.
+                    if ( current !== null && noteFence ) {
+                        notes[ current ] += '\n' + line;
+                        continue;
+                    }
+                    current = null;
+                    noteFence = false;
+                    kept.push( step.text );
+                    continue;
+                }
+
+                line = step.text.replace( /\n$/, '' );
+                masked = maskInlineCode( line );
+
+                if ( current !== null && /^[ \t]/.test( line ) ) {
+                    notes[ current ] += '\n' + line;
+                    continue;
+                }
+                if ( current !== null && line === '' ) {
+                    // Trailing blanks are harmless inside a note body; a
+                    // following block line closes the definition below.
+                    notes[ current ] += '\n';
                     continue;
                 }
                 current = null;
+                noteFence = false;
 
-                if ( fenceChar !== null ) {
-                    kept.push( lines[ i ] );
-                    fence = new RegExp(
-                        '^ {0,3}' + fenceChar + '{' + fenceLength + ',}[ \\t]*$'
-                    );
-                    if ( fence.test( lines[ i ] ) ) {
-                        fenceChar = null;
-                        fenceLength = 0;
-                    }
-                    continue;
-                }
-
-                fence = /^ {0,3}(`{3,}|~{3,})/.exec( lines[ i ] );
-                if ( fence ) {
-                    fenceChar = fence[ 1 ].charAt( 0 );
-                    fenceLength = fence[ 1 ].length;
-                    kept.push( lines[ i ] );
-                    continue;
-                }
-
-                match = FOOTNOTE_DEF_LINE.exec( lines[ i ] );
+                match = FOOTNOTE_DEF_LINE.exec( masked );
                 if ( match ) {
                     current = match[ 1 ];
-                    notes[ current ] = match[ 2 ];
+                    offset = match.index + match[ 0 ].length - match[ 2 ].length;
+                    notes[ current ] = line.substring( offset );
                     continue;
                 }
-                kept.push( lines[ i ] );
+                kept.push( step.text );
             }
-            cleaned.push( kept.join( '\n' ) );
+            cleaned.push( kept.join( '' ) );
         }
 
         return { pages: cleaned, notes: notes };
@@ -555,8 +730,8 @@
      * state (variable definitions, heading ids) spans all of its columns; the
      * rendered columnSplit markers are then turned into column blocks.  The
      * `marked` fallback has no column support, so it renders each column from
-     * the source instead.  Footnote markers that landed inside fenced code
-     * are restored to source text after sanitizing (E3S3 review).
+     * the source instead.  Code regions never carry markers: the prose
+     * walker skips them before marking (E3B1).
      *
      * @param {Array.<string>} pages page sources
      * @param {Object.<string, string>} footnoteNotes footnote bodies by label
@@ -607,9 +782,11 @@
     /**
      * Footnote reference marker: `<span class="hbw-footnote-mark"
      * data-hbw-footnote="label">` with no content.  The span survives the
-     * pinned renderer untouched (although DOMPurify drops the attribute), so
-     * references are resolved by walking the source references and the
-     * rendered marker spans side by side in document order.
+     * pinned renderer untouched in prose (although DOMPurify drops the
+     * attribute), so references are resolved by walking the source
+     * references and the rendered marker spans side by side in document
+     * order.  Inside fenced or inline code the renderer escapes the span to
+     * text, which the restore pass below turns back into the source.
      *
      * @type {RegExp}
      */
@@ -620,26 +797,79 @@
      * marker spans (E3S3T3).  Only references with a matching definition
      * become markers; anything without one (including `[^nope]`) stays
      * verbatim so readers see the source text instead of a broken link.
-     *
-     * Known limitation (E3B1, deferred to end of epic): a `[^label]` inside
-     * fenced or inline code still becomes a marker here, so code placed
-     * before prose can donate a note body to a later definition.  See
-     * https://trello.com/c/yOXKeyb2/175-e3b1-bug-footnote-refs-inside-code-link-to-the-wrong-note
+     * Fenced code blocks and inline code spans are never marked: the prose
+     * walker skips them, so `[^demo]` inside a fence or backticks reaches
+     * the renderer untouched (E3B1).
      *
      * @param {string} pageSource page source
      * @param {Object.<string, string>} notes footnote bodies by label
      * @return {string} page source with markers
      */
     function markFootnoteRefs( pageSource, notes ) {
-        return String( pageSource ).replace( FOOTNOTE_REF, function ( whole, label ) {
-            if ( !notes.hasOwnProperty( label ) ) {
-                return whole;
+        var walker = createProseWalker( pageSource );
+        var marked = [];
+        var step;
+        var refs;
+        var text;
+        var ordinal = 0;
+        var i;
+
+        while ( ( step = walker.next() ) !== null ) {
+            if ( !step.prose ) {
+                marked.push( step.text );
+                continue;
             }
-            return '<span class="hbw-footnote-mark" data-hbw-footnote="' +
-                label.replace( /&/g, '&amp;' ).replace( /"/g, '&quot;' ) +
-                '"></span>';
-        } );
+            refs = findFootnoteRefs( step.text, notes );
+            text = step.text;
+            for ( i = refs.length - 1; i >= 0; i-- ) {
+                // The ordinal is the reference's position in the prose
+                // stream, carried into the rendered DOM so pairing still
+                // works when the renderer destroys a marker (an indented
+                // code line is escaped into <pre><code> text).
+                text = text.substring( 0, refs[ i ].index ) +
+                    '<span class="hbw-footnote-mark hbw-fm-' +
+                    ( ordinal + i ) + '"></span>' +
+                    text.substring( refs[ i ].index + refs[ i ].length );
+            }
+            ordinal += refs.length;
+            marked.push( text );
+        }
+
+        return marked.join( '' );
     }
+
+    /**
+     * Ordered defined references that live in prose, ignoring code (E3B1).
+     *
+     * `markFootnoteRefs` replaces exactly these references with markers, so
+     * this list pairs one-to-one with the rendered markers.  Code that
+     * happens to contain `[^label]` neither becomes a marker nor consumes a
+     * position here.
+     *
+     * @param {string} pageSource page source
+     * @param {Object.<string, string>} notes footnote bodies by label
+     * @return {Array.<string>} labels in document order
+     */
+    function collectProseFootnoteRefs( pageSource, notes ) {
+        var walker = createProseWalker( pageSource );
+        var labels = [];
+        var step;
+        var refs;
+        var i;
+
+        while ( ( step = walker.next() ) !== null ) {
+            if ( !step.prose ) {
+                continue;
+            }
+            refs = findFootnoteRefs( step.text, notes );
+            for ( i = 0; i < refs.length; i++ ) {
+                labels.push( refs[ i ].label );
+            }
+        }
+        return labels;
+    }
+
+
 
     /**
      * Resolve footnote references inside one rendered page (E3S3T3).
@@ -674,23 +904,28 @@
         var refLink;
         var refIdUsed = {};
         var markers;
+        var labels;
         var marker;
         var label;
+        var ordinal;
         var i;
+        var marked;
 
-        FOOTNOTE_REF.lastIndex = 0;
-        while ( ( marker = FOOTNOTE_REF.exec( pageSource ) ) !== null ) {
-            label = marker[ 1 ];
-            if ( !notes.hasOwnProperty( label ) || seen[ label ] ) {
+        // Defined references in prose only (E3B1): code refs never became
+        // markers, so they must not take a pairing slot.
+        labels = collectProseFootnoteRefs( pageSource, notes );
+
+        for ( i = 0; i < labels.length; i++ ) {
+            if ( seen[ labels[ i ] ] ) {
                 continue;
             }
-            seen[ label ] = true;
-            order.push( label );
+            seen[ labels[ i ] ] = true;
+            order.push( labels[ i ] );
         }
 
-        // DOMPurify strips the `data-hbw-footnote` attribute but keeps the
-        // marker spans in place, so labels are matched by walking the source
-        // references and the rendered markers side by side in document order.
+        // Marker spans keep no attribute through sanitizing; they are
+        // recognised by class-name and paired with the prose reference list
+        // in document order.
         markers = [];
         ( function collect( node ) {
             var child;
@@ -706,14 +941,21 @@
             }
         }( pageNode ) );
 
-        FOOTNOTE_REF.lastIndex = 0;
+        // Pair each marker with the prose reference that produced it,
+        // by source ordinal rather than DOM position: a marker inside an
+        // indented code line is escaped into <pre><code> text, so
+        // positional pairing would hand every later marker the previous
+        // label.  A marker without a usable ordinal is skipped, never
+        // mis-linked (E3B1 follow-up).
         i = 0;
-        while ( i < markers.length &&
-            ( marker = FOOTNOTE_REF.exec( pageSource ) ) !== null ) {
-            label = marker[ 1 ];
-            if ( !notes.hasOwnProperty( label ) ) {
+        while ( i < markers.length ) {
+            marker = markers[ i ];
+            i++;
+            ordinal = /(?:^| )hbw-fm-(\d+)(?: |$)/.exec( marker.className );
+            if ( !ordinal || !labels.hasOwnProperty( ordinal[ 1 ] ) ) {
                 continue;
             }
+            label = labels[ ordinal[ 1 ] ];
             refLink = document.createElement( 'a' );
             refLink.setAttribute( 'href', '#hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             // No selector lookup: encoded labels can carry `.`, `(`, `)`
@@ -725,8 +967,7 @@
             }
             refLink.className = FOOTNOTE_REF_CLASS;
             refLink.appendChild( document.createTextNode( '[' + label + ']' ) );
-            markers[ i ].parentNode.replaceChild( refLink, markers[ i ] );
-            i++;
+            marker.parentNode.replaceChild( refLink, marker );
         }
 
         if ( !order.length ) {

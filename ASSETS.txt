@@ -1,0 +1,210 @@
+HomebreweryWiki — required Homebrewery v3.21.0 assets
+=====================================================
+
+Source : naturalcrit/homebrewery, tag v3.21.0
+Theme  : V3 "5e PHB" (base theme: V3 "Blank")
+
+This is the exact set of url(...) targets emitted by the two theme
+stylesheets after Less compilation:
+
+  themes/V3/Blank/style.less
+  themes/V3/5ePHB/style.less
+
+Compile and load them in that order: Blank is the base theme, 5ePHB
+overrides it. The Less imports assume the repository root is on the
+include path (for example: lessc --include-path=. themes/V3/5ePHB/style.less).
+
+Counts
+------
+125 runtime files, 11,916,709 bytes (~11.4 MiB)
+  34 font files
+  91 image files
+
+The path list below also names 14 build-input .less files and 3 license
+files, so the total number of path lines is larger than 125.
+
+Three additional .ttf fallbacks are referenced by the Font Awesome CSS
+but are not present in the upstream tag. The .woff2 files below are the
+real sources; the .ttf requests will 404 unless you add them from
+another Font Awesome release:
+
+  themes/fonts/iconFonts/fa-brands-400.ttf
+  themes/fonts/iconFonts/fa-regular-400.ttf
+  themes/fonts/iconFonts/fa-solid-900.ttf
+
+Path handling
+-------------
+Keep the upstream themes/... layout. The compiled CSS emits:
+
+  /assets/...            -> themes/assets/...
+  /fonts/iconFonts/...   -> themes/fonts/iconFonts/...
+  ../../../fonts/...     -> themes/fonts/...
+
+Serve these from a configurable base URL, or rewrite the URLs at build
+time. Do not assume the wiki is installed at the web root.
+
+Build inputs (not runtime assets)
+---------------------------------
+  themes/V3/Blank/style.less
+  themes/V3/5ePHB/style.less
+  themes/assets/assets.less
+  themes/fonts/5e/fonts.less
+  themes/fonts/Blank/fonts.less
+  themes/fonts/Journal/fonts.less
+  themes/fonts/iconFonts/elderberryInn.less
+  themes/fonts/iconFonts/diceFont.less
+  themes/fonts/iconFonts/gameIcons.less
+  themes/fonts/iconFonts/fontAwesome.less
+  themes/fonts/iconFonts/fontawesome-free.less
+  themes/fonts/iconFonts/fontawesome-brands.less
+  themes/fonts/iconFonts/fontawesome-regular.less
+  themes/fonts/iconFonts/fontawesome-solid.less
+
+Fonts (34)
+----------
+  themes/fonts/5e/Bookinsanity Bold Italic.woff2
+  themes/fonts/5e/Bookinsanity Bold.woff2
+  themes/fonts/5e/Bookinsanity Italic.woff2
+  themes/fonts/5e/Bookinsanity.woff2
+  themes/fonts/5e/Davek.woff2
+  themes/fonts/5e/Iokharic.woff2
+  themes/fonts/5e/Mr Eaves Small Caps.woff2
+  themes/fonts/5e/Nodesto Caps Condensed Bold Italic.woff2
+  themes/fonts/5e/Nodesto Caps Condensed Bold.woff2
+  themes/fonts/5e/Nodesto Caps Condensed Italic.woff2
+  themes/fonts/5e/Nodesto Caps Condensed.woff2
+  themes/fonts/5e/Nodesto Caps Wide.woff2
+  themes/fonts/5e/Overpass Medium.woff2
+  themes/fonts/5e/Rellanic.woff2
+  themes/fonts/5e/Scaly Sans Bold Italic.woff2
+  themes/fonts/5e/Scaly Sans Bold.woff2
+  themes/fonts/5e/Scaly Sans Caps.woff2
+  themes/fonts/5e/Scaly Sans Italic.woff2
+  themes/fonts/5e/Scaly Sans.woff2
+  themes/fonts/5e/Solbera Imitation Tweak.woff2
+  themes/fonts/5e/WalterTurncoat-Regular.woff2
+  themes/fonts/Blank/texgyrepagella-bold.woff2
+  themes/fonts/Blank/texgyrepagella-bolditalic.woff2
+  themes/fonts/Blank/texgyrepagella-italic.woff2
+  themes/fonts/Blank/texgyrepagella-regular.woff2
+  themes/fonts/Journal/FrederickaTheGreat-Regular.woff2
+  themes/fonts/Journal/PermanentMarker-Regular.woff2
+  themes/fonts/Journal/ReenieBeanie-Regular.woff2
+  themes/fonts/iconFonts/diceFont.woff2
+  themes/fonts/iconFonts/elderberryInn.woff2
+  themes/fonts/iconFonts/fa-brands-400.woff2
+  themes/fonts/iconFonts/fa-regular-400.woff2
+  themes/fonts/iconFonts/fa-solid-900.woff2
+  themes/fonts/iconFonts/gameIcons.woff
+
+Images (91)
+-----------
+  themes/assets/PHB_footerAccent.png
+  themes/assets/backCover.png
+  themes/assets/classTableDecoration.png
+  themes/assets/codeBorder.png
+  themes/assets/coverPageBanner.svg
+  themes/assets/descriptiveBorder.png
+  themes/assets/frameBorder.png
+  themes/assets/horizontalRule.svg
+  themes/assets/monsterBorderFancy.png
+  themes/assets/naturalCritLogoWhite.svg
+  themes/assets/noteBorder.png
+  themes/assets/parchmentBackground.jpg
+  themes/assets/parchmentBackgroundGrayscale.jpg
+  themes/assets/partCoverHeaderPHB.png
+  themes/assets/redTriangle.png
+  themes/assets/scriptBorder.png
+  themes/assets/waterColorMasks/missingImage.png
+  themes/assets/waterColorMasks/center/0001.webp
+  themes/assets/waterColorMasks/center/0002.webp
+  themes/assets/waterColorMasks/center/0003.webp
+  themes/assets/waterColorMasks/center/0004.webp
+  themes/assets/waterColorMasks/center/0005.webp
+  themes/assets/waterColorMasks/center/0006.webp
+  themes/assets/waterColorMasks/center/0007.webp
+  themes/assets/waterColorMasks/center/0008.webp
+  themes/assets/waterColorMasks/center/0009.webp
+  themes/assets/waterColorMasks/center/0010.webp
+  themes/assets/waterColorMasks/center/0011.webp
+  themes/assets/waterColorMasks/center/0012.webp
+  themes/assets/waterColorMasks/center/0013.webp
+  themes/assets/waterColorMasks/center/0014.webp
+  themes/assets/waterColorMasks/center/0015.webp
+  themes/assets/waterColorMasks/center/0016.webp
+  themes/assets/waterColorMasks/center/special.webp
+  themes/assets/waterColorMasks/corner/0001.webp
+  themes/assets/waterColorMasks/corner/0002.webp
+  themes/assets/waterColorMasks/corner/0003.webp
+  themes/assets/waterColorMasks/corner/0004.webp
+  themes/assets/waterColorMasks/corner/0005.webp
+  themes/assets/waterColorMasks/corner/0006.webp
+  themes/assets/waterColorMasks/corner/0007.webp
+  themes/assets/waterColorMasks/corner/0008.webp
+  themes/assets/waterColorMasks/corner/0009.webp
+  themes/assets/waterColorMasks/corner/0010.webp
+  themes/assets/waterColorMasks/corner/0011.webp
+  themes/assets/waterColorMasks/corner/0012.webp
+  themes/assets/waterColorMasks/corner/0013.webp
+  themes/assets/waterColorMasks/corner/0014.webp
+  themes/assets/waterColorMasks/corner/0015.webp
+  themes/assets/waterColorMasks/corner/0016.webp
+  themes/assets/waterColorMasks/corner/0017.webp
+  themes/assets/waterColorMasks/corner/0018.webp
+  themes/assets/waterColorMasks/corner/0019.webp
+  themes/assets/waterColorMasks/corner/0020.webp
+  themes/assets/waterColorMasks/corner/0021.webp
+  themes/assets/waterColorMasks/corner/0022.webp
+  themes/assets/waterColorMasks/corner/0023.webp
+  themes/assets/waterColorMasks/corner/0024.webp
+  themes/assets/waterColorMasks/corner/0025.webp
+  themes/assets/waterColorMasks/corner/0026.webp
+  themes/assets/waterColorMasks/corner/0027.webp
+  themes/assets/waterColorMasks/corner/0028.webp
+  themes/assets/waterColorMasks/corner/0029.webp
+  themes/assets/waterColorMasks/corner/0030.webp
+  themes/assets/waterColorMasks/corner/0031.webp
+  themes/assets/waterColorMasks/corner/0032.webp
+  themes/assets/waterColorMasks/corner/0033.webp
+  themes/assets/waterColorMasks/corner/0034.webp
+  themes/assets/waterColorMasks/corner/0035.webp
+  themes/assets/waterColorMasks/corner/0036.webp
+  themes/assets/waterColorMasks/corner/0037.webp
+  themes/assets/waterColorMasks/edge/0001.webp
+  themes/assets/waterColorMasks/edge/0002.webp
+  themes/assets/waterColorMasks/edge/0003.webp
+  themes/assets/waterColorMasks/edge/0004.webp
+  themes/assets/waterColorMasks/edge/0005.webp
+  themes/assets/waterColorMasks/edge/0006.webp
+  themes/assets/waterColorMasks/edge/0007.webp
+  themes/assets/waterColorMasks/edge/0008.webp
+  themes/assets/watercolor/watercolor1.png
+  themes/assets/watercolor/watercolor2.png
+  themes/assets/watercolor/watercolor3.png
+  themes/assets/watercolor/watercolor4.png
+  themes/assets/watercolor/watercolor5.png
+  themes/assets/watercolor/watercolor6.png
+  themes/assets/watercolor/watercolor7.png
+  themes/assets/watercolor/watercolor8.png
+  themes/assets/watercolor/watercolor9.png
+  themes/assets/watercolor/watercolor10.png
+  themes/assets/watercolor/watercolor11.png
+  themes/assets/watercolor/watercolor12.png
+
+License files to vendor
+-----------------------
+  themes/fonts/Journal/LICENSE - PermanentMarker.txt
+  themes/fonts/iconFonts/diceFont_license.md
+  themes/fonts/iconFonts/game-icons_license.md
+
+The 5e fonts have no license file in the upstream tag. Treat them as
+unlicensed until audited. The Blank theme's TeX Gyre Pagella fonts are
+GUST Font License (GFL/LPPL); the license text is in
+themes/fonts/Blank/fonts.less.
+
+Not included
+------------
+The renderer JavaScript (shared/markdown.js and the icon-font JS
+modules) is a separate build input, not a visual asset. The legacy
+phb.standalone.css is also not part of this list; it is an older
+self-contained artifact, not the current V3 theme.
