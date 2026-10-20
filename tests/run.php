@@ -1,6 +1,6 @@
 <?php
 /**
- * Unit/smoke tests for the HomebreweryWiki extension (E1S1 + E1S2 + E1S3).
+ * Unit/smoke tests for the HomebreweryWiki extension (E1S1 + E1S2 + E1S3 + E1S4).
  *
  * Run under a MediaWiki 1.14.1 install, e.g.:
  *   php maintenance/hbwtest.php
@@ -85,8 +85,9 @@ t_assert( HomebreweryWiki::onArticleSave( $mainArt, $user, $badText2, $summary, 
 // context may not have, so it is intentionally not asserted in this suite.
 
 // --- E1S3: renderer enqueue decision (T1) ---
-// The bundle must load only for an ordinary view of a brew-namespace page:
-// never for non-brew pages, edit, history, preview (action=submit) or diffs.
+// The bundle loads for an ordinary view of a brew-namespace page: never for
+// non-brew pages, plain edit, history, diffs, or a bare submit without a
+// preview request (E1S4 adds the preview case below).
 $brewTitle = Title::newFromText( 'Manual:Test' );
 $mainTitle = Title::newFromText( 'Main Page' );
 t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'view', null ) === true,
@@ -105,6 +106,61 @@ t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'view', '5' ) === 
     'E1S3 enqueue: diff view => no load' );
 t_assert( HomebreweryWiki::shouldEnqueueRenderer( null, 'view', null ) === false,
     'E1S3 enqueue: null title => no load' );
+
+// --- E1S4: preview runs through the same render path (T1-T3) ---
+// A preview post (action=submit) and a preview-on-open (action=edit with
+// preview=yes) must load the exact same bundle as a saved view.
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'submit', null, true ) === true,
+    'E1S4 enqueue: brew preview (submit) => load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'edit', null, true ) === true,
+    'E1S4 enqueue: brew preview-on-open (edit+preview=yes) => load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'edit', null, false ) === false,
+    'E1S4 enqueue: plain brew edit => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'history', null, true ) === false,
+    'E1S4 enqueue: brew history with preview flag => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $mainTitle, 'submit', null, true ) === false,
+    'E1S4 enqueue: non-brew preview => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'submit', '5', true ) === false,
+    'E1S4 enqueue: brew preview diff => no load' );
+
+// Brew-preview recogniser: Manual: page, preview requested, no diff.
+t_assert( HomebreweryWiki::isBrewPreview( $brewTitle, true, null ) === true,
+    'E1S4 preview: brew preview recognised' );
+t_assert( HomebreweryWiki::isBrewPreview( $brewTitle, false, null ) === false,
+    'E1S4 preview: no preview request => not a preview' );
+t_assert( HomebreweryWiki::isBrewPreview( $mainTitle, true, null ) === false,
+    'E1S4 preview: non-brew => not a brew preview' );
+t_assert( HomebreweryWiki::isBrewPreview( $brewTitle, true, '5' ) === false,
+    'E1S4 preview: diff => not a preview' );
+t_assert( HomebreweryWiki::isBrewPreview( null, true, null ) === false,
+    'E1S4 preview: null title => not a preview' );
+
+/**
+ * Minimal stand-in for WebRequest in the preview-source fallback test.
+ */
+class HbwTestRequest {
+    var $posted;
+    var $text;
+    function __construct( $posted, $text ) {
+        $this->posted = $posted;
+        $this->text   = $text;
+    }
+    function wasPosted() {
+        return $this->posted;
+    }
+    function getText( $name ) {
+        return $this->text;
+    }
+}
+
+// Posted preview source is trimmed exactly as EditPage::safeUnicodeInput does
+// (E1S4T2), so the preview payload matches what a save would store.
+$fake = new HbwTestRequest( true, "= Title =\n\nbody\n\n" );
+t_assert( HomebreweryWiki::previewSource( $fake, null ) === "= Title =\n\nbody",
+    'E1S4 preview source: posted textbox trimmed like EditPage' );
+$fakeGet = new HbwTestRequest( false, '' );
+t_assert( HomebreweryWiki::previewSource( $fakeGet, null ) === '',
+    'E1S4 preview source: no article and no POST => empty' );
 
 // --- E1S3: renderer asset list & load order (T1) ---
 // markdown parser first, sanitizer second, render module last.

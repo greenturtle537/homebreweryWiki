@@ -21,6 +21,17 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 class HomebreweryWiki {
 
     /**
+     * The normalized source of the edit form currently being rendered
+     * (E1S4).  EditPage::importFormData() trims the posted textbox, so using
+     * the raw request would make preview and saved view differ by trailing
+     * whitespace.  Captured in EditPage::showEditForm:initial and consumed by
+     * the preview OutputPageBeforeHTML handler in the same request.
+     *
+     * @var string|null
+     */
+    public static $previewSourceText = null;
+
+    /**
      * $wgExtensionFunctions entry point.  Called once, after MediaWiki is
      * fully initialised.
      *
@@ -96,29 +107,78 @@ class HomebreweryWiki {
     }
 
     /**
-     * Whether the renderer bundle must load for this request (E1S3T1).
+     * Whether the renderer bundle must load for this request (E1S3T1, E1S4).
      *
      * Kept a pure predicate so the enqueue rule is unit-testable without an
-     * OutputPage or a live request.  The bundle loads only for an ordinary
-     * *view* of a brew-namespace page: edit, history, preview (action=submit),
-     * purge, diffs, and every non-brew page are excluded.
+     * OutputPage or a live request.  The bundle loads for an ordinary *view*
+     * of a brew-namespace page and for a brew edit *preview* (E1S4: preview
+     * runs through the same render path, DESIGN D3).  Edit, history, purge,
+     * diffs, and every non-brew page stay excluded.
      *
-     * @param Title|mixed $title  Page title (or anything; non-Title => false).
-     * @param string      $action Requested action, e.g. 'view', 'edit'.
-     * @param mixed       $diff   Raw 'diff' request value (null when absent).
+     * @param Title|mixed $title   Page title (or anything; non-Title => false).
+     * @param string      $action  Requested action, e.g. 'view', 'edit'.
+     * @param mixed       $diff    Raw 'diff' request value (null when absent).
+     * @param bool        $preview Whether the request asked for a preview.
      * @return bool
      */
-    public static function shouldEnqueueRenderer( $title, $action, $diff ) {
+    public static function shouldEnqueueRenderer( $title, $action, $diff, $preview = false ) {
         if ( !( $title instanceof Title ) ) {
             return false;
         }
         if ( $title->getNamespace() !== NS_MANUAL ) {
             return false;
         }
-        if ( $action !== 'view' ) {
+        if ( $diff !== null ) {
             return false;
         }
-        if ( $diff !== null ) {
+        if ( $action === 'view' ) {
+            return true;
+        }
+        // Preview posts action=submit; a reopening edit form can also ask for
+        // preview with action=edit&preview=yes (EditPage::previewOnOpen).
+        return ( $preview && ( $action === 'submit' || $action === 'edit' ) );
+    }
+
+    /**
+     * Whether the current request asks for an edit preview (E1S4).
+     *
+     * MediaWiki 1.14 previews arrive three ways: the Show preview button
+     * (wpPreview), the live-preview button (wpLivePreview, which we downgrade
+     * to a normal submit), and preview-on-open (preview=yes).
+     *
+     * @param WebRequest|mixed $request Request object (non-object => false).
+     * @return bool
+     */
+    public static function isPreviewRequest( $request ) {
+        if ( !is_object( $request ) || !method_exists( $request, 'getCheck' ) ) {
+            return false;
+        }
+        if ( $request->getCheck( 'wpPreview' ) || $request->getCheck( 'wpLivePreview' ) ) {
+            return true;
+        }
+        return ( $request->getVal( 'preview' ) === 'yes' );
+    }
+
+    /**
+     * Whether this request is a brew-namespace preview render (E1S4).
+     *
+     * Pure predicate: a preview for a Manual: page, not a diff.  Used by the
+     * OutputPageBeforeHTML handler that swaps the mangled wikitext preview for
+     * the hidden-source placeholder the render module consumes.
+     *
+     * @param Title|mixed $title   Page title.
+     * @param bool        $preview Whether a preview was requested.
+     * @param mixed       $diff    Raw 'diff' request value.
+     * @return bool
+     */
+    public static function isBrewPreview( $title, $preview, $diff ) {
+        if ( !( $title instanceof Title ) ) {
+            return false;
+        }
+        if ( $title->getNamespace() !== NS_MANUAL ) {
+            return false;
+        }
+        if ( !$preview || $diff !== null ) {
             return false;
         }
         return true;
@@ -141,8 +201,9 @@ class HomebreweryWiki {
 
     /**
      * BeforePageDisplay hook.  Loads the renderer bundle for brew page views
-     * only (E1S3T1).  Non-brew pages, edit/history/preview screens and diffs
-     * receive no brew module, so nothing outside a brew view is affected.
+     * (E1S3T1) and brew edit previews (E1S4).  Non-brew pages, plain edit,
+     * history screens and diffs receive no brew module, so nothing outside a
+     * brew view/preview is affected.
      *
      * MediaWiki 1.14 signature: ( &$out, &$sk ).
      *
@@ -156,16 +217,143 @@ class HomebreweryWiki {
         // 1.14 OutputPage has no getTitle(); the current Title is the $wgTitle
         // global (it is null/absent on some request types, which we treat as
         // "not a brew view").
-        $title  = $wgTitle;
-        $action = $wgRequest->getVal( 'action', 'view' );
-        $diff   = $wgRequest->getVal( 'diff' );
+        $title   = $wgTitle;
+        $action  = $wgRequest->getVal( 'action', 'view' );
+        $diff    = $wgRequest->getVal( 'diff' );
+        $preview = self::isPreviewRequest( $wgRequest );
 
-        if ( ! self::shouldEnqueueRenderer( $title, $action, $diff ) ) {
+        if ( ! self::shouldEnqueueRenderer( $title, $action, $diff, $preview ) ) {
             return true;
         }
 
         foreach ( self::rendererAssets() as $asset ) {
             $out->addScriptFile( $wgScriptPath . $asset );
+        }
+        return true;
+    }
+
+    /**
+     * OutputPageBeforeHTML hook.  Makes the brew edit preview run through the
+     * view render path (E1S4, DESIGN D3).
+     *
+     * The stock 1.14 preview runs the editor's markdown through the wikitext
+     * parser, which mangles it.  On a brew preview we drop that parsed body and
+     * emit the very same hidden-source placeholder the saved view emits, so
+     * HomebreweryWiki.render.js renders preview and view with one code path.
+     * The "Preview" heading and preview notice are kept.
+     *
+     * MediaWiki 1.14 signature: ( &$out, &$text ).  EditPage::showPreview()
+     * fires this explicitly for previews; OutputPage::addParserOutput() fires
+     * it for ordinary parsed output, which is why the brew-preview guard runs
+     * first.
+     *
+     * @param OutputPage &$out  Output page being built.
+     * @param string     &$text Preview HTML (replaced on a brew preview).
+     * @return bool Always true.
+     */
+    public static function onOutputPageBeforeHTML( &$out, &$text ) {
+        global $wgTitle, $wgRequest, $wgArticle;
+
+        $preview = self::isPreviewRequest( $wgRequest );
+        $diff    = $wgRequest->getVal( 'diff' );
+
+        if ( ! self::isBrewPreview( $wgTitle, $preview, $diff ) ) {
+            return true;
+        }
+
+        $source = ( self::$previewSourceText !== null )
+            ? self::$previewSourceText
+            : self::previewSource( $wgRequest, $wgArticle );
+        if ( ! self::isValidBrewText( $source ) ) {
+            return true;
+        }
+
+        $note = $out->parse( wfMsg( 'previewnote' ) );
+
+        $text = '<h2>' . htmlspecialchars( wfMsg( 'preview' ) ) . "</h2>\n"
+              . '<div class="previewnote">' . $note . "</div>\n"
+              . self::brewPlaceholder( $source );
+        return true;
+    }
+
+    /**
+     * EditPage::showEditForm:initial hook.  Capture the normalized textbox for
+     * the brew preview (E1S4T2).
+     *
+     * The form render is the point where EditPage has already parsed and
+     * trimmed the submitted text, so this is the exact source a save would
+     * store.  Preview-on-open (preview=yes) is covered too, because
+     * initialiseForm() fills textbox1 before showEditForm() runs.
+     *
+     * MediaWiki 1.14 signature: ( &$editpage ).
+     *
+     * @param EditPage &$editpage Edit form being rendered.
+     * @return bool Always true.
+     */
+    public static function onEditPageShowEditFormInitial( &$editpage ) {
+        self::$previewSourceText = null;
+
+        if ( !( $editpage instanceof EditPage ) ) {
+            return true;
+        }
+        if ( !( $editpage->mTitle instanceof Title ) ||
+             $editpage->mTitle->getNamespace() !== NS_MANUAL ) {
+            return true;
+        }
+
+        self::$previewSourceText = $editpage->textbox1;
+        return true;
+    }
+
+    /**
+     * Resolve the source being previewed (E1S4T2).
+     *
+     * A posted preview carries the editor's unsaved text in wpTextbox1; a
+     * preview-on-open (preview=yes) has no POST body, so the saved article text
+     * is the only source.  The EditPage hook above normally supplies the exact
+     * normalized text; this is the fallback, with the same trailing-whitespace
+     * trim EditPage applies, so preview and saved view agree byte for byte.
+     *
+     * @param WebRequest|mixed $request Request object.
+     * @param Article|mixed    $article Current article, when available.
+     * @return string Raw brew markdown ('' when nothing is resolvable).
+     */
+    public static function previewSource( $request, $article ) {
+        if ( is_object( $request ) && method_exists( $request, 'wasPosted' ) &&
+             $request->wasPosted() ) {
+            // Mirror EditPage::safeUnicodeInput(), which rtrims the textbox.
+            return rtrim( $request->getText( 'wpTextbox1' ) );
+        }
+        if ( $article instanceof Article ) {
+            return $article->getContent();
+        }
+        return '';
+    }
+
+    /**
+     * EditPageBeforeEditButtons hook.  Downgrades the 1.14 AJAX "live preview"
+     * button to a normal server-side preview on brew pages (E1S4).
+     *
+     * Live preview builds its XML from EditPage::getPreviewText() directly and
+     * never fires OutputPageBeforeHTML, so it would bypass the shared render
+     * path.  Without its onclick handler the button simply posts
+     * wpLivePreview, which EditPage already treats as a preview.
+     *
+     * MediaWiki 1.14 signature: ( &$editpage, &$buttons, &$tabindex ).
+     *
+     * @param EditPage &$editpage Edit form being rendered.
+     * @param array    &$buttons  Button HTML keyed by name.
+     * @param int      &$tabindex Current tabindex.
+     * @return bool Always true.
+     */
+    public static function onEditPageBeforeEditButtons( &$editpage, &$buttons, &$tabindex ) {
+        global $wgTitle;
+
+        if ( !( $wgTitle instanceof Title ) || $wgTitle->getNamespace() !== NS_MANUAL ) {
+            return true;
+        }
+        if ( isset( $buttons['live'] ) && is_string( $buttons['live'] ) ) {
+            $buttons['live'] = preg_replace( '/\sonclick="[^"]*"/', '', $buttons['live'] );
         }
         return true;
     }
