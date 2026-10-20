@@ -1,6 +1,6 @@
 <?php
 /**
- * Unit/smoke tests for the HomebreweryWiki extension (E1S1 + E1S2).
+ * Unit/smoke tests for the HomebreweryWiki extension (E1S1 + E1S2 + E1S3).
  *
  * Run under a MediaWiki 1.14.1 install, e.g.:
  *   php maintenance/hbwtest.php
@@ -77,29 +77,60 @@ t_assert( HomebreweryWiki::onArticleSave( $mainArt, $user, $badText2, $summary, 
 // text).  Exercising it here needs a live DB connection, which this CLI
 // context may not have, so it is intentionally not asserted in this suite.
 
-// --- E1S2: view-module enqueue decision (T1) ---
-// The module must load only for an ordinary view of a brew-namespace page:
+// --- E1S3: renderer enqueue decision (T1) ---
+// The bundle must load only for an ordinary view of a brew-namespace page:
 // never for non-brew pages, edit, history, preview (action=submit) or diffs.
 $brewTitle = Title::newFromText( 'Manual:Test' );
 $mainTitle = Title::newFromText( 'Main Page' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'view', null ) === true,
-    'E1S2 enqueue: brew view => load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $mainTitle, 'view', null ) === false,
-    'E1S2 enqueue: non-brew view => no load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'edit', null ) === false,
-    'E1S2 enqueue: edit => no load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'history', null ) === false,
-    'E1S2 enqueue: history => no load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'submit', null ) === false,
-    'E1S2 enqueue: preview (submit) => no load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'purge', null ) === false,
-    'E1S2 enqueue: purge => no load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( $brewTitle, 'view', '5' ) === false,
-    'E1S2 enqueue: diff view => no load' );
-t_assert( HomebreweryWiki::shouldEnqueueViewModule( null, 'view', null ) === false,
-    'E1S2 enqueue: null title => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'view', null ) === true,
+    'E1S3 enqueue: brew view => load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $mainTitle, 'view', null ) === false,
+    'E1S3 enqueue: non-brew view => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'edit', null ) === false,
+    'E1S3 enqueue: edit => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'history', null ) === false,
+    'E1S3 enqueue: history => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'submit', null ) === false,
+    'E1S3 enqueue: preview (submit) => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'purge', null ) === false,
+    'E1S3 enqueue: purge => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( $brewTitle, 'view', '5' ) === false,
+    'E1S3 enqueue: diff view => no load' );
+t_assert( HomebreweryWiki::shouldEnqueueRenderer( null, 'view', null ) === false,
+    'E1S3 enqueue: null title => no load' );
 
-// --- E1S2: hidden source placeholder (T2) ---
+// --- E1S3: renderer asset list & load order (T1) ---
+// markdown parser first, sanitizer second, render module last.
+$assets = HomebreweryWiki::rendererAssets();
+t_assert( count( $assets ) === 3, 'E1S3 assets: three scripts' );
+t_assert( $assets[0] === HOMEBREWERYWIKI_MARKED_LIB,
+    'E1S3 assets: marked loads first' );
+t_assert( $assets[1] === HOMEBREWERYWIKI_PURIFY_LIB,
+    'E1S3 assets: DOMPurify loads second' );
+t_assert( $assets[2] === HOMEBREWERYWIKI_RENDER_MODULE,
+    'E1S3 assets: render module loads last' );
+
+// Running from the extension dir (repo layout) or from MW maintenance/
+// (copied to hbwtest.php): resolve the extension directory either way.
+$extDir = dirname( dirname( __FILE__ ) );
+if ( !file_exists( $extDir . '/HomebreweryWiki.php' ) ) {
+    $extDir .= '/extensions/HomebreweryWiki';
+}
+$relMarked   = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_MARKED_LIB );
+$relPurify   = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_PURIFY_LIB );
+$relRenderer = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_RENDER_MODULE );
+t_assert( file_exists( $extDir . '/' . $relMarked ),
+    'E1S3 assets: marked bundle present' );
+t_assert( file_exists( $extDir . '/' . $relPurify ),
+    'E1S3 assets: DOMPurify bundle present' );
+t_assert( file_exists( $extDir . '/' . $relRenderer ),
+    'E1S3 assets: render module present' );
+t_assert( strpos( HOMEBREWERYWIKI_MARKED_LIB, '0.3.19' ) !== false,
+    'E1S3 assets: marked version pinned' );
+t_assert( strpos( HOMEBREWERYWIKI_PURIFY_LIB, '2.5.8' ) !== false,
+    'E1S3 assets: DOMPurify version pinned' );
+
+// --- E1S2 (kept): hidden source placeholder (T2) ---
 $ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
 t_assert( strpos( $ph, 'class="hbw-brew"' ) !== false, 'E1S2 placeholder: scoping wrapper present' );
 t_assert( strpos( $ph, 'id="hbw-source"' ) !== false, 'E1S2 placeholder: source id present' );

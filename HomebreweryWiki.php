@@ -18,16 +18,24 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 }
 
 /** Extension version, surfaced on Special:Version. */
-define( 'HOMEBREWERYWIKI_VERSION', '0.2.0' );
+define( 'HOMEBREWERYWIKI_VERSION', '0.3.0' );
 
 /**
- * Front-end view module (E1S2), relative to $wgScriptPath.
+ * Front-end renderer assets (E1S3), relative to $wgScriptPath, in load order.
  *
  * Loaded on brew page views only.  The module reads the hidden source
- * placeholder the server emits (see HomebreweryWiki::brewPlaceholder()) and
- * places the saved markdown into the content pane as plain preformatted text.
+ * placeholder the server emits (see HomebreweryWiki::brewPlaceholder()),
+ * renders the saved markdown to HTML, sanitizes it, and replaces the
+ * placeholder in the content pane.
+ *
+ * The vendored libraries are pinned and ES5-compatible (desktop floor, Q19):
+ * marked 0.3.19 (MIT) and DOMPurify 2.5.8 (Apache-2.0 / MPL-2.0).  See
+ * vendor/README.md.  Epic C replaces marked with the pinned Homebrewery
+ * renderer bundle; Epic G owns the reproducible build.
  */
-define( 'HOMEBREWERYWIKI_VIEW_MODULE', '/extensions/HomebreweryWiki/HomebreweryWiki.view.js' );
+define( 'HOMEBREWERYWIKI_MARKED_LIB', '/extensions/HomebreweryWiki/vendor/marked-0.3.19.min.js' );
+define( 'HOMEBREWERYWIKI_PURIFY_LIB', '/extensions/HomebreweryWiki/vendor/dompurify-2.5.8.min.js' );
+define( 'HOMEBREWERYWIKI_RENDER_MODULE', '/extensions/HomebreweryWiki/HomebreweryWiki.render.js' );
 
 /**
  * Extension credits (MediaWiki 1.14 shape).
@@ -95,7 +103,7 @@ $wgHooks['ArticleFromTitle'][] = 'HomebreweryWiki::onArticleFromTitle';
 $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
 
 /**
- * Brew pane display (E1S2 - "show saved markdown as plain preformatted text").
+ * Brew pane display (E1S2 placeholder + E1S3 rendered HTML).
  *
  * Both hooks are 1.14-signature (no $context / no OutputPage arg on the
  * article hook):
@@ -107,7 +115,7 @@ $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
  *   action=raw return before this hook, so they stay untouched.
  *
  * - BeforePageDisplay, fired from OutputPage::output(), with ( &$out, &$sk ).
- *   Used to load the view module for brew page views only (legacy
+ *   Used to load the renderer bundle for brew page views only (legacy
  *   addScriptFile; 1.14 has no ResourceLoader).
  */
 $wgHooks['ArticleViewHeader'][] = 'HomebreweryWiki::onArticleViewHeader';
