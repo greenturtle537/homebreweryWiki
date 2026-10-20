@@ -348,6 +348,27 @@ t_assert( strpos( $themeCss, '#hbw-brew-rendered' ) === false,
     'E3S2 styles: no id selector; scoping is by wrapper class' );
 t_assert( strpos( $themeCss, '.hbw-brew .hbw-frame' ) !== false,
     'E3.5 styles: parent stylesheet sizes the iframe render host' );
+// --- E3.5S2: compiled upstream theme + asset manifest ---
+t_assert( HomebreweryWiki::themeCssUrl() === '/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme/theme.css',
+    'E3.5S2 theme: default theme URL points at the compiled artifact' );
+$compiledThemePath = $extDir . '/vendor/homebrewery-3.21.0/theme/theme.css';
+$manifestPath = $extDir . '/vendor/homebrewery-3.21.0/theme/assets.sha256';
+t_assert( file_exists( $compiledThemePath ), 'E3.5S2 theme: compiled theme.css present' );
+t_assert( file_exists( $manifestPath ), 'E3.5S2 theme: asset manifest present' );
+if ( file_exists( $compiledThemePath ) ) {
+    $compiledTheme = file_get_contents( $compiledThemePath );
+    t_assert( strpos( $compiledTheme, "url('/assets/" ) === false &&
+        strpos( $compiledTheme, 'url("/assets/' ) === false,
+        'E3.5S2 theme: root-absolute asset URLs are rewritten' );
+    t_assert( strpos( $compiledTheme, 'columnWrapper' ) !== false,
+        'E3.5S2 theme: upstream page/column rules compiled' );
+}
+if ( file_exists( $manifestPath ) ) {
+    $manifestLines = file( $manifestPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
+    t_assert( count( $manifestLines ) >= 125,
+        'E3.5S2 theme: manifest pins the runtime asset set (' . count( $manifestLines ) . ')' );
+}
+
 t_assert( preg_match( '/^\s*(html|body|\*|:root)\s*[,{]/mi', $themeCss ) === 0,
     'E3S2 styles: no bare html/body/*/:root selectors' );
 

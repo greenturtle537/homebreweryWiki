@@ -36,32 +36,8 @@ var VIEWPORT = { width: 1280, height: 1024 };
 var PIXEL_THRESHOLD = 0.1;
 var MAX_DIFF_RATIO = 0.01;
 
-/*
- * TEST-ONLY geometry stylesheet, injected into the render iframe.
- *
- * The compiled upstream theme (vendor/homebrewery-3.21.0/theme/theme.css) is
- * built by E3.5S2 and does not exist yet. Until it lands, the `.page` box is
- * the one thing this harness must pin down: letter size and relative
- * positioning (page numbers and footnotes anchor to it). E3.5S2 replaces
- * this test stylesheet with the real compiled theme inside the shell.
- */
-var TEST_PAGE_CSS = [
-    'html, body { margin: 0; padding: 0; background: #fff; }',
-    '.pages { margin: 0; padding: 0; }',
-    '.page { width: 215.9mm; height: 279.4mm; position: relative;',
-    '        margin: 0 auto 16px; overflow: hidden; background: #fff; }',
-    '.page:last-child { margin-bottom: 0; }',
-    '.columnWrapper { padding: 10mm; box-sizing: border-box; }',
-    '.pageNumber { position: absolute; right: 8mm; bottom: 8mm; }',
-    '.hbw-footnotes { margin-top: 0.6em; padding-top: 0.4em;',
-    '                 border-top: 1px solid rgba(0, 0, 0, 0.15);',
-    '                 font-size: 0.75em; line-height: 1.25; }',
-    '.hbw-footnotes-list { margin: 0; padding-left: 1.4em; }',
-    '.hbw-footnote-ref { vertical-align: super; font-size: 0.75em; }',
-    '.hbw-footnote-back { text-decoration: none; }',
-    'img { max-width: 100%; height: auto; }',
-    'table { border-collapse: collapse; max-width: 100%; }'
-].join( '\n' );
+/* The harness serves the real shell and compiled theme over a fake
+ * same-origin host, so geometry, fonts and assets are the production path. */
 
 var pass = 0;
 var fail = 0;
@@ -180,36 +156,72 @@ async function checkFixture( browser, fixture, name ) {
         }
     } );
 
-    await page.setContent(
-        '<!doctype html><html><head><meta charset="utf-8"></head><body>' +
+    var harnessHtml =
+        '<!doctype html><html><head><meta charset="utf-8">' +
+        '<link rel="stylesheet" href="/extensions/HomebreweryWiki/HomebreweryWiki.theme.css">' +
+        '</head><body>' +
         '<div id="content"><div class="hbw-brew" id="hbw-brew"' +
+        ' data-hbw-shell="/extensions/HomebreweryWiki/HomebreweryWiki.shell.html"' +
+        ' data-hbw-theme="/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme/theme.css"' +
         ' data-hbw-page-width="215.9" data-hbw-page-height="279.4">' +
         '<div class="hbw-source" id="hbw-source" style="display:none">' + escaped + '</div>' +
         '<noscript><pre class="hbw-brew-text">\n' + escaped + '</pre></noscript>' +
-        '</div></div></body></html>',
-        { waitUntil: 'load' }
-    );
+        '</div></div></body></html>';
 
-    await page.addStyleTag( { content: asset( 'HomebreweryWiki.theme.css' ) } );
+    // Serve the repository under a fake same-origin host so the shell URL, the
+    // compiled theme and its font/texture URLs all resolve exactly as they do
+    // on a wiki install. No network access is used.
+    await page.route( 'http://hbw.test/**', function ( route ) {
+        var url = new URL( route.request().url() );
+        var rel;
+        var file;
+        var types = {
+            '.html': 'text/html',
+            '.css': 'text/css',
+            '.js': 'application/javascript',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf': 'font/ttf'
+        };
+        if ( url.pathname === '/harness.html' ) {
+            return route.fulfill( { status: 200, contentType: 'text/html', body: harnessHtml } );
+        }
+        rel = decodeURIComponent( url.pathname.replace( /^\/extensions\/HomebreweryWiki\//, '' ) );
+        file = path.join( root, rel );
+        if ( file.indexOf( root ) !== 0 || !fs.existsSync( file ) || fs.statSync( file ).isDirectory() ) {
+            return route.fulfill( { status: 404, body: '' } );
+        }
+        return route.fulfill( {
+            status: 200,
+            contentType: types[ path.extname( file ).toLowerCase() ] || 'application/octet-stream',
+            path: file
+        } );
+    } );
+
+    await page.goto( 'http://hbw.test/harness.html', { waitUntil: 'load' } );
+
     await page.addScriptTag( { content: asset( 'vendor/marked-0.3.19.min.js' ) } );
     await page.addScriptTag( { content: asset( 'vendor/dompurify-2.5.8.min.js' ) } );
     await page.addScriptTag( { content: asset( 'vendor/homebrewery-3.21.0/renderer.min.js' ) } );
     await page.addScriptTag( { content: asset( 'HomebreweryWiki.render.js' ) } );
 
-    await page.waitForSelector( '#hbw-frame', { state: 'attached' } );
-    await page.evaluate( function ( css ) {
+    await page.waitForFunction( function () {
         var frame = document.getElementById( 'hbw-frame' );
         var doc = frame && frame.contentDocument;
-        var style;
-        if ( !doc ) {
-            throw new Error( 'render iframe has no same-origin document' );
+        return !!doc && doc.querySelectorAll( '.pages > .page' ).length === 3;
+    }, { timeout: 15000 } );
+
+    // Let the theme fonts settle before the screenshot.
+    await page.evaluate( async function () {
+        var frame = document.getElementById( 'hbw-frame' );
+        if ( frame && frame.contentDocument && frame.contentDocument.fonts ) {
+            await frame.contentDocument.fonts.ready;
         }
-        // E3.5S2 will inject the compiled theme here instead.
-        style = doc.createElement( 'style' );
-        style.setAttribute( 'data-hbw-test-geometry', '1' );
-        style.appendChild( doc.createTextNode( css ) );
-        ( doc.head || doc.documentElement ).appendChild( style );
-    }, TEST_PAGE_CSS );
+    } );
 
     var stats = await page.evaluate( function () {
         var host = document.getElementById( 'hbw-brew' );
@@ -238,7 +250,10 @@ async function checkFixture( browser, fixture, name ) {
                 return Math.round( p.getBoundingClientRect().height );
             } ),
             scrollWidth: doc.documentElement.scrollWidth,
-            viewport: doc.documentElement.clientWidth
+            viewport: doc.documentElement.clientWidth,
+            themeLinks: Array.prototype.slice.call(
+                doc.querySelectorAll( 'link[rel="stylesheet"]' )
+            ).map( function ( l ) { return l.getAttribute( 'href' ); } )
         };
     } );
 
@@ -253,6 +268,9 @@ async function checkFixture( browser, fixture, name ) {
         'visual ' + name + ': host reports three pages' );
     ok( stats.pages === 3, 'visual ' + name + ': iframe .pages holds three .page blocks' );
     ok( stats.numbers === 3, 'visual ' + name + ': one .pageNumber per page' );
+    ok( stats.themeLinks.some( function ( href ) {
+        return /vendor\/homebrewery-3\.21\.0\/theme\/theme\.css$/.test( href || '' );
+    } ), 'visual ' + name + ': compiled upstream theme is linked inside the iframe' );
     ok( stats.widths.every( function ( w ) {
         return Math.abs( w - 816 ) <= 1;
     } ), 'visual ' + name + ': pages are 215.9mm wide (' +
