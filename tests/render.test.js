@@ -1261,6 +1261,30 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'note fence: no console errors' );
 }() );
 
+// --- E3B1 follow-up: an unindented fence closes the note ---
+( function () {
+    var source = 'Prose cites alpha.[^a]\n\n'
+        + '[^a]: a note\n\n'
+        + '```js\n'
+        + 'page code\n'
+        + '```\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var bodyPre = rendered ? rendered.querySelectorAll( '.hbw-column pre' ) : [];
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-a',
+        'unindented fence: prose reference links its note' );
+    ok( notes.length === 1 && notes[ 0 ].textContent.indexOf( 'a note' ) !== -1,
+        'unindented fence: the note keeps its own body' );
+    ok( notes.length === 1 && notes[ 0 ].textContent.indexOf( 'page code' ) === -1,
+        'unindented fence: the page fence does not join the note' );
+    ok( bodyPre.length === 1 && bodyPre[ 0 ].textContent.indexOf( 'page code' ) !== -1,
+        'unindented fence: the fence stays in the page body' );
+    ok( page.errors.length === 0, 'unindented fence: no console errors' );
+}() );
+
 // --- E3S3 T2: data-* hygiene on the hardened tree ---
 ( function () {
     var source = '<div data-evil="1" data-hbw-footnote="kept">content</div>\n';

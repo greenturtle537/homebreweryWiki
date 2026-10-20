@@ -648,13 +648,17 @@
                         if ( openMatch ) {
                             fenceChar = openMatch[ 1 ].charAt( 0 );
                             fenceLength = openMatch[ 1 ].length;
-                            if ( current !== null ) {
-                                // A fence opened while a note is active
-                                // belongs to that note (E3B1 follow-up).
+                            if ( current !== null && /^[ \t]/.test( line ) ) {
+                                // Only an indented fence is a lazy
+                                // continuation of the note and belongs to it
+                                // (E3B1 follow-up).  An unindented fence is
+                                // not: it closes the note, as in CommonMark.
                                 noteFence = true;
                                 notes[ current ] += '\n' + line;
                                 continue;
                             }
+                            current = null;
+                            noteFence = false;
                         }
                         kept.push( step.text );
                         continue;
