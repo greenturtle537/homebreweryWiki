@@ -556,6 +556,48 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'side-by-side: no console errors' );
 }() );
 
+// --- E3S2 T5: no brew rule matches anything outside the wrapper ---
+( function () {
+    var themeSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    ).replace( /\/\*[\s\S]*?\*\//g, '' );
+    var ruleMatch = /^\s*([^{}@\/][^{}]*?)\s*\{/gm;
+    var dom = new JSDOM(
+        '<!doctype html><html><body>'
+        + '<div id="content"><h1>Plain page</h1><p>Text</p>'
+        + '<img src="/x.png"><table><tr><td>c</td></tr></table>'
+        + '<div class="note">not a brew</div>'
+        + '</div></body></html>',
+        { url: 'http://wiki.example.test/index.php?title=Main_Page' }
+    );
+    var doc = dom.window.document;
+    var match;
+    var escaped = [];
+
+    while ( ( match = ruleMatch.exec( themeSource ) ) !== null ) {
+        var parts = match[ 1 ].split( ',' );
+        var i;
+        for ( i = 0; i < parts.length; i++ ) {
+            var selector = parts[ i ].replace( /^\s+|\s+$/g, '' );
+            if ( !selector ) {
+                continue;
+            }
+            var hits = doc.querySelectorAll( selector );
+            var j;
+            for ( j = 0; j < hits.length; j++ ) {
+                if ( !hits[ j ].closest( '.hbw-brew' ) ) {
+                    escaped.push( selector );
+                }
+            }
+        }
+    }
+
+    ok( escaped.length === 0,
+        'no-leak: no theme rule matches outside .hbw-brew (' + escaped.join( ' | ' ) + ')' );
+    ok( doc.querySelectorAll( '.hbw-brew' ).length === 0,
+        'no-leak: the non-brew fixture has no brew wrapper at all' );
+}() );
+
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );
