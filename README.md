@@ -105,10 +105,12 @@ sh build/theme/fetch-assets.sh   # downloads the pinned tag, verifies hashes
 The build itself (`sh build/theme/build.sh`) fetches `naturalcrit/homebrewery`
 v3.21.0, compiles `themes/V3/Blank/style.less` then
 `themes/V3/5ePHB/style.less`, and rewrites `/assets`, `/fonts/iconFonts` and
-`../../../fonts` URLs to `HBW_ASSET_BASE` (default
-`/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme`). To use an
-admin-supplied theme directory instead, set `$wgHomebreweryWikiThemeCss` in
-`LocalSettings.php`. Never hotlink Homebrewery.
+`../../../fonts` URLs to be **relative to `theme.css`** (`./themes/...`). That
+keeps the committed stylesheet working under any `$wgScriptPath`, including a
+subdirectory install such as `/wiki`. `HBW_ASSET_BASE` overrides the prefix
+when the assets are served from another origin or directory; rebuild after
+changing it. To use an admin-supplied theme directory instead, set
+`$wgHomebreweryWikiThemeCss` in `LocalSettings.php`. Never hotlink Homebrewery.
 
 Visual regression for the reference brew (headless Chromium; needs the browser
 once — `npx playwright install --with-deps chromium`). Run

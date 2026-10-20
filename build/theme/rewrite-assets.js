@@ -10,8 +10,11 @@
  *                                   source, wrong once compiled to one file)
  *
  * The wiki may be installed under a subdirectory, so every one of these is
- * rewritten to `<asset-base>/themes/...`.  Only url() payloads are touched;
- * the rest of the stylesheet is byte-for-byte the compiled upstream output.
+ * rewritten to `<asset-base>/themes/...`.  The build default asset base is
+ * `.`, which yields URLs relative to theme.css and works under any
+ * $wgScriptPath; an absolute base is available for CDN/admin layouts.
+ * Only url() payloads are touched; the rest of the stylesheet stays
+ * byte-for-byte the compiled upstream output.
  *
  * Usage: node rewrite-assets.js <input.css> <asset-base>
  */

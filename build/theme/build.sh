@@ -5,6 +5,11 @@
 # theme then the 5ePHB theme with Less, rewrites the asset URLs to the
 # configured base path, and writes a SHA-256 manifest for the runtime assets.
 #
+# Asset URLs are relative to theme.css by default, so the stylesheet works
+# under any $wgScriptPath (root or /wiki) without a rebuild. Override
+# HBW_ASSET_BASE only when the assets are served from a different origin or
+# directory, and rebuild before deploying that layout:
+#
 #   sh build/theme/build.sh
 #   HBW_ASSET_BASE=/wiki/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme \
 #       sh build/theme/build.sh
@@ -15,7 +20,7 @@
 set -eu
 
 PIN="v3.21.0"
-ASSET_BASE="${HBW_ASSET_BASE:-/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme}"
+ASSET_BASE="${HBW_ASSET_BASE:-.}"
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$DIR/../.." && pwd)
 UP="$DIR/upstream"
