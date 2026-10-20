@@ -44,4 +44,21 @@
         min-height: 0;
         border: 0;
     }
+
+    /* E3.5S4T3/T4: the print route (`printable=yes`) prints the sheet stack
+     * only. Everything outside the brew host is hidden, and the host is
+     * pinned to the top-left of the sheet. */
+    body.hbw-print-mode * {
+        visibility: hidden;
+    }
+    body.hbw-print-mode #hbw-brew,
+    body.hbw-print-mode #hbw-brew * {
+        visibility: visible;
+    }
+    body.hbw-print-mode #hbw-brew {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
 }

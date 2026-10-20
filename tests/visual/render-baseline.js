@@ -212,7 +212,11 @@ async function checkFixture( browser, fixture, name ) {
     await page.waitForFunction( function () {
         var frame = document.getElementById( 'hbw-frame' );
         var doc = frame && frame.contentDocument;
-        return !!doc && doc.querySelectorAll( '.pages > .page' ).length === 3;
+        var page = doc && doc.querySelector( '.pages > .page' );
+        // Wait for the compiled theme to apply, not just for the page nodes:
+        // letter geometry is a theme rule, so an early read would measure the
+        // unstyled content height.
+        return !!page && page.offsetWidth >= 800 && page.offsetHeight >= 1000;
     }, { timeout: 15000 } );
 
     // Let the theme fonts settle before the screenshot.
@@ -243,12 +247,10 @@ async function checkFixture( browser, fixture, name ) {
             reportedPages: host.getAttribute( 'data-hbw-pages' ),
             pages: pages.length,
             numbers: numbers.length,
-            widths: pages.map( function ( p ) {
-                return Math.round( p.getBoundingClientRect().width );
-            } ),
-            heights: pages.map( function ( p ) {
-                return Math.round( p.getBoundingClientRect().height );
-            } ),
+            // offsetWidth/Height are layout sizes: unaffected by the pane-fit
+            // transform, so they assert the true letter page box.
+            widths: pages.map( function ( p ) { return p.offsetWidth; } ),
+            heights: pages.map( function ( p ) { return p.offsetHeight; } ),
             scrollWidth: doc.documentElement.scrollWidth,
             viewport: doc.documentElement.clientWidth,
             themeLinks: Array.prototype.slice.call(

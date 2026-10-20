@@ -175,6 +175,13 @@ $wgHooks['ArticleFromTitle'][] = 'HomebreweryWiki::onArticleFromTitle';
 $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
 
 /**
+ * Wiki link/category registration for brew pages (E3.5S3T4). Brew views skip
+ * the wikitext parser, so the link tables are updated from the source tokens
+ * on save instead.
+ */
+$wgHooks['ArticleSaveComplete'][] = 'HomebreweryWiki::onArticleSaveComplete';
+
+/**
  * Brew pane display (E1S2 placeholder + E1S3 rendered HTML).
  *
  * Both hooks are 1.14-signature (no $context / no OutputPage arg on the

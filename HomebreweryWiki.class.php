@@ -188,6 +188,55 @@ class HomebreweryWiki {
     }
 
     /**
+     * ArticleSaveComplete hook (E3.5S3T4).  Brew views skip the wikitext
+     * parser, so `pagelinks` / `categorylinks` would never be updated.  Build
+     * the link set from the source tokens and run LinksUpdate, which makes
+     * Special:WhatLinksHere and category pages work without touching the
+     * stored markdown.
+     *
+     * MediaWiki 1.14 signature (ArticleSaveComplete):
+     *   ( &$article, &$user, $text, $summary, $minoredit, $watchthis,
+     *     $sectionanchor, &$flags, $revision, &$status, $baseRevId )
+     *
+     * @return bool Always true.
+     */
+    public static function onArticleSaveComplete( &$article, &$user, $text, $summary,
+        $minoredit, $watchthis, $sectionanchor, &$flags, $revision, &$status ) {
+        if ( !( $article instanceof Article ) ||
+             $article->getTitle()->getNamespace() !== NS_MANUAL ) {
+            return true;
+        }
+        if ( !is_string( $text ) || !class_exists( 'ParserOutput' ) ||
+             !class_exists( 'LinksUpdate' ) ) {
+            return true;
+        }
+
+        $output = new ParserOutput();
+
+        foreach ( self::brewLinkTargets( $text ) as $target ) {
+            $title = Title::newFromText( $target );
+            if ( $title instanceof Title && $title->getNamespace() !== NS_MEDIA ) {
+                $output->addLink( $title );
+            }
+        }
+        foreach ( self::brewCategoryNames( $text ) as $category ) {
+            $output->addCategory( self::categoryDbKey( $category ), '' );
+        }
+        // 1.14 images are registered as links too, so `[[File:...]]` shows up
+        // in the file's "what links here".
+        foreach ( self::brewFileMap( $text ) as $name => $info ) {
+            $fileTitle = Title::makeTitleSafe( NS_FILE, $name );
+            if ( $fileTitle instanceof Title ) {
+                $output->addLink( $fileTitle );
+            }
+        }
+
+        $update = new LinksUpdate( $article->getTitle(), $output, false );
+        $update->doUpdate();
+        return true;
+    }
+
+    /**
      * Whether $text is safe to treat as brew source (E1S1T7): a string that is
      * empty or valid UTF-8.
      *
@@ -324,6 +373,121 @@ class HomebreweryWiki {
 		return array(
 			HOMEBREWERYWIKI_THEME_CSS,
 		);
+	}
+
+	/**
+	 * Category names declared in brew source (E3.5S3T4).
+	 *
+	 * `[[Category:Name]]` / `[[Category:Name|sort]]` are source-level tokens:
+	 * the renderer never sees them, and the page is registered under each
+	 * category through OutputPage (view) and LinksUpdate (save).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array Unique category DB keys, in source order.
+	 */
+	public static function brewCategoryNames( $text ) {
+		$names = array();
+		if ( !is_string( $text ) ) {
+			return $names;
+		}
+		if ( preg_match_all( '/\[\[Category:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
+			foreach ( $m[1] as $name ) {
+				$name = trim( $name );
+				if ( $name !== '' && !isset( $names[$name] ) ) {
+					$names[$name] = true;
+				}
+			}
+		}
+		return array_keys( $names );
+	}
+
+	/**
+	 * Database key for a category name (E3.5S3T4).
+	 *
+	 * `categorylinks.cl_to` and OutputPage::addCategoryLinks() use the
+	 * namespace-less page_title form (underscores), not the display name.
+	 *
+	 * @param string $name Category display name.
+	 * @return string
+	 */
+	public static function categoryDbKey( $name ) {
+		$name = trim( $name );
+		if ( class_exists( 'Title' ) ) {
+			$title = Title::makeTitleSafe( NS_CATEGORY, $name );
+			if ( $title instanceof Title ) {
+				return $title->getDBkey();
+			}
+		}
+		return str_replace( ' ', '_', $name );
+	}
+
+	/**
+	 * Wiki-link targets declared in brew source (E3.5S3T4).
+	 *
+	 * Excludes `[[Category:...]]` and `[[File:...]]`, which register through
+	 * the category and image paths instead.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array Unique target titles, in source order.
+	 */
+	public static function brewLinkTargets( $text ) {
+		$targets = array();
+		if ( !is_string( $text ) ) {
+			return $targets;
+		}
+		if ( preg_match_all( '/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/', $text, $m ) ) {
+			foreach ( $m[1] as $target ) {
+				$target = trim( $target );
+				if ( $target === '' ) {
+					continue;
+				}
+				if ( preg_match( '/^(Category|File):/i', $target ) ) {
+					continue;
+				}
+				if ( !isset( $targets[$target] ) ) {
+					$targets[$target] = true;
+				}
+			}
+		}
+		return array_keys( $targets );
+	}
+
+	/**
+	 * Resolve `[[File:...]]` tokens to same-origin upload URLs (E3.5S3T3).
+	 *
+	 * The client cannot derive MediaWiki's hashed upload paths, so the server
+	 * resolves each referenced file once and hands the render module a map.
+	 * Missing files are reported as `exists => false` so the module can render
+	 * a visible placeholder instead of a broken image (D2).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array File name => array( 'url' => string, 'exists' => bool ).
+	 */
+	public static function brewFileMap( $text ) {
+		$map = array();
+		if ( !is_string( $text ) ) {
+			return $map;
+		}
+		if ( !preg_match_all( '/\[\[File:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
+			return $map;
+		}
+		foreach ( $m[1] as $name ) {
+			$name = trim( $name );
+			if ( $name === '' || isset( $map[$name] ) ) {
+				continue;
+			}
+			$url = '';
+			$exists = false;
+			if ( class_exists( 'Image' ) ) {
+				$image = Image::newFromName( $name );
+				if ( $image && $image->exists() ) {
+					$url = $image->getURL();
+					$exists = ( $url !== '' );
+				}
+			}
+			$map[$name] = array( 'url' => $url, 'exists' => $exists );
+		}
+		return $map;
 	}
 
 	/**
@@ -582,8 +746,49 @@ class HomebreweryWiki {
         $pcache     = false;
 
         global $wgOut, $wgRequest;
-        $wgOut->addHTML( self::brewPlaceholder( $article->getBrewText(), self::isPrintRequest( $wgRequest ) ) );
+        $text = $article->getBrewText();
+        $wgOut->addHTML( self::brewPlaceholder( $text, self::isPrintRequest( $wgRequest ) ) );
+
+        // E3.5S3T4: categories come from source tokens, not the wikitext
+        // parser (brew views skip it). Register them for the skin footer.
+        $categories = self::brewCategoryNames( $text );
+        if ( count( $categories ) ) {
+            $categoryLinks = array();
+            foreach ( $categories as $category ) {
+                $categoryLinks[self::categoryDbKey( $category )] = 'normal';
+            }
+            $wgOut->addCategoryLinks( $categoryLinks );
+        }
         return true;
+    }
+
+    /**
+     * Base URL for wiki links inside a brew (E3.5S3T2).
+     *
+     * Uses index.php?title= because it works for both pretty and ugly URLs on
+     * MediaWiki 1.14. The render module appends an encoded title and marks
+     * the anchor `target="_top"` so a click navigates the parent page.
+     *
+     * @return string
+     */
+    public static function wikiBaseUrl() {
+        global $wgScriptPath;
+        return $wgScriptPath . '/index.php?title=';
+    }
+
+    /**
+     * JSON file map for the render module (E3.5S3T3).
+     *
+     * @param mixed $text Raw brew markdown.
+     * @return string JSON object, safe to place in an HTML attribute.
+     */
+    public static function brewFileMapJson( $text ) {
+        $map = self::brewFileMap( $text );
+        if ( !function_exists( 'json_encode' ) ) {
+            return '{}';
+        }
+        $json = json_encode( $map );
+        return ( $json === false ) ? '{}' : $json;
     }
 
     /**
@@ -614,7 +819,9 @@ class HomebreweryWiki {
         $attrs = ' data-hbw-shell="' . htmlspecialchars( self::shellUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
                . ' data-hbw-theme="' . htmlspecialchars( self::themeCssUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
                . ' data-hbw-page-width="215.9"'
-               . ' data-hbw-page-height="279.4"';
+               . ' data-hbw-page-height="279.4"'
+               . ' data-hbw-wiki-base="' . htmlspecialchars( self::wikiBaseUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
+               . ' data-hbw-files="' . htmlspecialchars( self::brewFileMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"';
         if ( $print ) {
             $attrs .= ' data-hbw-print="1"';
         }

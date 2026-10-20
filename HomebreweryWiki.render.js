@@ -322,6 +322,13 @@
                 }
             }
 
+            if ( node.nodeName && node.nodeName.toLowerCase() === 'a' ) {
+                // Wiki links must navigate the parent, never the frame
+                // (E3.5S3T2); rel keeps the opener isolated.
+                node.setAttribute( 'target', '_top' );
+                node.setAttribute( 'rel', 'noopener noreferrer' );
+            }
+
             if ( node.nodeName && node.nodeName.toLowerCase() === 'img' ) {
                 var src = node.getAttribute( 'src' );
                 if ( src && !isAllowedImage( src ) ) {
@@ -511,6 +518,144 @@
                 return { prose: true, text: line + ( index < lines.length ? '\n' : '' ) };
             }
         };
+    }
+
+    /**
+     * Wiki token: `[[Page]]`, `[[Page|label]]`, `[[Category:Name]]`,
+     * `[[File:Name.png|alt|caption|size]]` (D8 / E3.5S3T1).
+     *
+     * @type {RegExp}
+     */
+    var WIKI_TOKEN = /\[\[([^\[\]|]+)((?:\|[^\[\]]*)*)\]\]/g;
+
+    /**
+     * Escape text for insertion into generated HTML.
+     *
+     * @param {string} value
+     * @return {string}
+     */
+    function escapeHtml( value ) {
+        return String( value )
+            .replace( /&/g, '&amp;' )
+            .replace( /</g, '&lt;' )
+            .replace( />/g, '&gt;' )
+            .replace( /"/g, '&quot;' );
+    }
+
+    /**
+     * Split a token's `|arg|arg` tail into arguments.
+     *
+     * @param {string} rest
+     * @return {Array.<string>}
+     */
+    function wikiArgs( rest ) {
+        var parts = String( rest || '' ).split( '|' );
+        parts.shift();
+        return parts;
+    }
+
+    /**
+     * Build the HTML for one wiki token (E3.5S3T1/T2/T3).
+     *
+     * Categories produce no content (they register server-side); files resolve
+     * through the server-supplied map, with a visible placeholder when the
+     * upload does not exist; everything else becomes a wiki link that
+     * navigates the parent (`target="_top"`).
+     *
+     * @param {string} target Token target (before the first `|`).
+     * @param {Array.<string>} args Token arguments.
+     * @param {Object} config `{ base: string, files: Object }`.
+     * @return {string} Replacement HTML, or the token when unrecognised.
+     */
+    function wikiTokenHtml( target, args, config ) {
+        var lower = target.toLowerCase();
+        var name;
+        var info;
+        var alt;
+        var size;
+        var src;
+        var i;
+
+        if ( lower.indexOf( 'category:' ) === 0 ) {
+            return '';
+        }
+
+        if ( lower.indexOf( 'file:' ) === 0 ) {
+            name = target.substring( 5 );
+            info = config.files[ name ];
+            alt = args.length && args[ 0 ] ? args[ 0 ] : name;
+            size = '';
+            for ( i = 0; i < args.length; i++ ) {
+                if ( /^\d+(px)?$/.test( args[ i ] ) ) {
+                    size = args[ i ];
+                }
+            }
+            if ( info && info.exists && info.url ) {
+                src = escapeHtml( info.url );
+                return '<img src="' + src + '" alt="' + escapeHtml( alt ) + '"' +
+                    ( size ? ' style="width: ' + escapeHtml( size ) + '; height: auto"' : '' ) +
+                    '>';
+            }
+            return '<span class="hbw-missing-file" title="Missing file: ' +
+                escapeHtml( name ) + '">[File: ' + escapeHtml( name ) + ']</span>';
+        }
+
+        if ( !config.base ) {
+            return '[[' + target + ( args.length ? '|' + args.join( '|' ) : '' ) + ']]';
+        }
+        return '<a href="' + escapeHtml( config.base + encodeURIComponent(
+            target.replace( / /g, '_' )
+        ) ) + '" target="_top" rel="noopener noreferrer">' +
+            escapeHtml( args.length && args[ 0 ] ? args[ 0 ] : target ) + '</a>';
+    }
+
+    /**
+     * Rewrite wiki tokens in one page source (E3.5S3T1). Prose lines only:
+     * fenced code and inline code keep their literal `[[...]]` text.
+     *
+     * @param {string} pageSource
+     * @param {Object} config `{ base: string, files: Object }`.
+     * @return {string}
+     */
+    function applyWikiTokens( pageSource, config ) {
+        var walker = createProseWalker( pageSource );
+        var out = [];
+        var step;
+        var line;
+        var newline;
+        var masked;
+        var replaced;
+        var last;
+        var match;
+
+        while ( ( step = walker.next() ) !== null ) {
+            newline = step.text.charAt( step.text.length - 1 ) === '\n' ? '\n' : '';
+            line = newline ? step.text.substring( 0, step.text.length - 1 ) : step.text;
+            if ( !step.prose ) {
+                out.push( step.text );
+                continue;
+            }
+
+            // Inline code spans are masked with NULs (same length), so a token
+            // written inside backticks is never rewritten, while offsets still
+            // point at the original line (E3B1 rule, applied to wiki tokens).
+            masked = maskInlineCode( line );
+            replaced = '';
+            last = 0;
+            WIKI_TOKEN.lastIndex = 0;
+            while ( ( match = WIKI_TOKEN.exec( masked ) ) !== null ) {
+                replaced += line.substring( last, match.index );
+                replaced += wikiTokenHtml(
+                    match[ 1 ].replace( /^\s+|\s+$/g, '' ),
+                    wikiArgs( match[ 2 ] ),
+                    config
+                );
+                last = match.index + match[ 0 ].length;
+            }
+            replaced += line.substring( last );
+            out.push( replaced + newline );
+        }
+        return out.join( '' );
     }
 
     /**
@@ -763,7 +908,7 @@
      * @param {Object.<string, string>} footnoteNotes footnote bodies by label
      * @return {Array.<string>|null} sanitized page HTML in document order
      */
-    function renderPages( pages, footnoteNotes ) {
+    function renderPages( pages, footnoteNotes, wikiConfig ) {
         var renderedPages = [];
         var pageMarked;
         var html;
@@ -771,7 +916,10 @@
 
         for ( p = 0; p < pages.length; p++ ) {
             pageMarked = replaceColumnMarkers(
-                markFootnoteRefs( pages[ p ], footnoteNotes )
+                markFootnoteRefs(
+                    applyWikiTokens( pages[ p ], wikiConfig ),
+                    footnoteNotes
+                )
             );
             html = renderMarkdown( pageMarked, p );
             if ( html === null ) {
@@ -1122,23 +1270,99 @@
     }
 
     /**
-     * Size the frame from the page count (E3.5S1 baseline; E3.5S4 adds pane
-     * fit and the ResizeObserver).
+     * Fit the page stack to the pane (E3.5S4T1/T2).
+     *
+     * Pages stay true letter size inside the iframe; the parent writes a
+     * scale rule into the frame and sizes the frame from the scaled page
+     * stack. The print route skips scaling so each page prints as a real
+     * letter sheet.
      *
      * @param {HTMLElement} frame
      * @param {HTMLElement} pagesNode
+     * @param {HTMLElement} host
      * @return {void}
      */
-    function sizeFrame( frame, pagesNode ) {
-        var count = pagesNode.querySelectorAll( '.' + PAGE_CLASS ).length;
-        var gap = 16;
+    function fitFrame( frame, pagesNode, host ) {
+        var doc = pagesNode.ownerDocument;
+        var pageWidth = mmToPx( PAGE_WIDTH_MM );
+        var available = host.clientWidth || frame.clientWidth || pageWidth;
+        var printMode = host.getAttribute( 'data-hbw-print' ) === '1';
+        var scale = printMode ? 1 : Math.min( 1, available / pageWidth );
+        var style = doc.getElementById( 'hbw-fit' );
+        var css;
         var height;
-        if ( !count ) {
-            return;
+
+        if ( !style ) {
+            style = doc.createElement( 'style' );
+            style.id = 'hbw-fit';
+            ( doc.head || doc.documentElement ).appendChild( style );
         }
-        height = Math.ceil( mmToPx( PAGE_HEIGHT_MM ) * count + gap * ( count - 1 ) );
-        frame.style.width = '100%';
+        while ( style.firstChild ) {
+            style.removeChild( style.firstChild );
+        }
+
+        css = '.pages{width:' + pageWidth + 'px;' +
+            'transform:scale(' + scale + ');transform-origin:top left;}';
+        if ( printMode ) {
+            css += '.page{margin:0;}';
+        }
+        style.appendChild( doc.createTextNode( css ) );
+
+        height = Math.ceil(
+            ( pagesNode.scrollHeight || pageWidth ) * scale
+        );
+        frame.style.width = printMode ? pageWidth + 'px' : '100%';
         frame.style.height = height + 'px';
+        frame.setAttribute( 'data-hbw-scale', String( scale ) );
+    }
+
+    /**
+     * Keep the frame fitted on resize (E3.5S4T2): a ResizeObserver on the host
+     * where available, a window resize listener otherwise. Font and image
+     * loads also refit, because they change the page stack height.
+     *
+     * @param {HTMLElement} frame
+     * @param {HTMLElement} pagesNode
+     * @param {HTMLElement} host
+     * @return {void}
+     */
+    function watchFrame( frame, pagesNode, host ) {
+        var doc = pagesNode.ownerDocument;
+        var images;
+        var i;
+
+        function refit() {
+            fitFrame( frame, pagesNode, host );
+        }
+
+        refit();
+
+        if ( window.ResizeObserver ) {
+            try {
+                frame.hbwObserver = new window.ResizeObserver( refit );
+                frame.hbwObserver.observe( host );
+                // The theme stylesheet and fonts arrive after injection; the
+                // page stack height changes, so observe it as well.
+                frame.hbwObserver.observe( pagesNode );
+            } catch ( e ) {
+                frame.hbwObserver = null;
+            }
+        }
+        if ( !frame.hbwObserver && window.addEventListener ) {
+            window.addEventListener( 'resize', refit, false );
+        }
+        if ( doc.fonts && doc.fonts.ready && doc.fonts.ready.then ) {
+            doc.fonts.ready.then( refit );
+        }
+        // Late CSS/font application can change the stack without a resize.
+        if ( window.setTimeout ) {
+            window.setTimeout( refit, 100 );
+            window.setTimeout( refit, 500 );
+        }
+        images = pagesNode.getElementsByTagName( 'img' );
+        for ( i = 0; i < images.length; i++ ) {
+            images[ i ].onload = refit;
+        }
     }
 
     /**
@@ -1194,6 +1418,7 @@
         var text;
         var shell;
         var theme;
+        var wikiConfig;
         var frame;
         var done = false;
         var timer = null;
@@ -1209,6 +1434,17 @@
         text = source.textContent || source.innerText || '';
         shell = host.getAttribute( 'data-hbw-shell' ) || '';
         theme = host.getAttribute( 'data-hbw-theme' ) || '';
+        wikiConfig = {
+            base: host.getAttribute( 'data-hbw-wiki-base' ) || '',
+            files: {}
+        };
+        try {
+            wikiConfig.files = JSON.parse(
+                host.getAttribute( 'data-hbw-files' ) || '{}'
+            ) || {};
+        } catch ( e ) {
+            wikiConfig.files = {};
+        }
         frame = createFrame();
 
         function fallback() {
@@ -1251,7 +1487,7 @@
                 pageSources = splitPages( text );
                 footnoteData = extractFootnotes( pageSources );
                 renderedPages = renderPages(
-                    footnoteData.pages, footnoteData.notes
+                    footnoteData.pages, footnoteData.notes, wikiConfig
                 );
             } catch ( e ) {
                 renderedPages = null;
@@ -1270,7 +1506,7 @@
             pagesNode = buildPagesInto(
                 doc, renderedPages, footnoteData.pages, footnoteData.notes
             );
-            sizeFrame( frame, pagesNode );
+            watchFrame( frame, pagesNode, host );
 
             host.setAttribute( 'data-hbw-render', 'html' );
             host.setAttribute( 'data-hbw-pages', String( renderedPages.length ) );
@@ -1279,6 +1515,19 @@
             }
             if ( source.parentNode ) {
                 source.parentNode.removeChild( source );
+            }
+
+            if ( host.getAttribute( 'data-hbw-print' ) === '1' ) {
+                if ( document.body ) {
+                    document.body.className = ( document.body.className + ' hbw-print-mode' )
+                        .replace( /^\s+/, '' );
+                }
+                // Give the theme fonts a moment, then print the sheet stack.
+                setTimeout( function () {
+                    if ( window.print ) {
+                        window.print();
+                    }
+                }, 250 );
             }
         }
 
