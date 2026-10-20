@@ -146,12 +146,20 @@ function hbwStyleParity() {
     var diffs = 0;
     var maxDiff = 0;
     var pairs = Math.min( ours.length, refs.length );
+    var countMismatch = Math.abs( ours.length - refs.length );
     var i;
     var j;
 
-    if ( !pairs ) {
+    if ( !ours.length && !refs.length ) {
         verdict.textContent = 'Style parity: no comparable elements (harness brew changed?)';
         return;
+    }
+
+    // An unmatched element is itself a parity difference: the verdict must
+    // never report identical panes when one side renders extra elements.
+    diffs += countMismatch;
+    if ( countMismatch ) {
+        maxDiff = Math.max( maxDiff, 1 );
     }
 
     for ( i = 0; i < pairs; i++ ) {
