@@ -27,7 +27,12 @@
 <p>
     Left: this extension. Right: Homebrewery's own renderer, same source.
     The automated structural comparison lives in <code>tests/render.test.js</code>.
+    A style-parity verdict is computed below: it compares the extension's
+    pane against the raw renderer output for the production-style brew and
+    reports the absolute count and maximum magnitude of computed-style
+    differences.
 </p>
+<p id="hbw-verdict">Style parity: computing…</p>
 
 <div class="panes">
     <section class="pane">
@@ -69,7 +74,20 @@ var HBW_BREW = [
     '',
     '\\column',
     '',
-    'Second column text.'
+    'Second column text.',
+    '',
+    '\\page',
+    '',
+    '# Page Three',
+    '',
+    '\\wide',
+    'First sect0 paragraph.',
+    '',
+    '\\justify',
+    'A justified sect1 paragraph.',
+    '',
+    '\\background=#123456',
+    'Painted paragraph.'
 ].join('\n');
 
 document.getElementById('hbw-source').textContent = HBW_BREW;
@@ -80,15 +98,101 @@ document.getElementById('hbw-source').textContent = HBW_BREW;
 <script src="../vendor/homebrewery-3.21.0/renderer.min.js"></script>
 
 <script>
+/**
+ * Wrap each columnSplit segment of one rendered page in its own column
+ * block, mirroring the extension's renderPages() path.
+ *
+ * @param {string} page       page source (markers intact)
+ * @param {number} pageNumber zero-based page index
+ * @return {string} column blocks
+ */
+function renderReferenceColumns( page, pageNumber ) {
+    return window.HomebreweryRenderer.render( page, pageNumber )
+        .split( /<div[^>]*class=["']columnSplit["'][^>]*>\s*<\/div>/gi )
+        .map( function ( column ) {
+            return '<div class="hbw-column">' + column + '</div>';
+        } )
+        .join( '' );
+}
+
+var HBW_PAGE_SPLIT = /^\s*\\page\s*$/m;
+
 document.getElementById('hbw-reference').innerHTML =
-    '<div class="hbw-page"><div class="hbw-column">' +
-    window.HomebreweryRenderer.render(HBW_BREW.split(/^\s*\\page\s*$/m)[0], 0) +
-    '</div></div>' +
-    '<div class="hbw-page"><div class="hbw-column">' +
-    window.HomebreweryRenderer.render(HBW_BREW.split(/^\s*\\page\s*$/m)[1], 1) +
-    '</div></div>';
+    '<div class="hbw-page">' +
+    renderReferenceColumns(HBW_BREW.split(HBW_PAGE_SPLIT)[0], 0) +
+    '</div>' +
+    '<div class="hbw-page">' +
+    renderReferenceColumns(HBW_BREW.split(HBW_PAGE_SPLIT)[1], 1) +
+    '</div>' +
+    '<div class="hbw-page">' +
+    renderReferenceColumns(HBW_BREW.split(HBW_PAGE_SPLIT)[2], 2) +
+    '</div>';
+
+/**
+ * Style-parity verdict for the production-style brew.
+ *
+ * Walks the panes `div`, `p.sect0`, `.descriptive` and `p.sect1` in document
+ * order, reads each property of `HBW_STYLE_PROPS` with getComputedStyle on
+ * both sides, and reports the absolute count of differing values plus the
+ * maximum magnitude of the differences (numeric differences in pixels; any
+ * non-numeric difference counts as magnitude 1).
+ */
+function hbwStyleParity() {
+    var verdict = document.getElementById( 'hbw-verdict' );
+    var props = [ 'width', 'text-align', 'background-color', 'margin-top' ];
+    var fences = [ 'div.note', 'p.sect0', 'div.descriptive', 'p.sect1' ];
+    var ours = document.querySelectorAll( '#hbw-brew ' + fences.join( ', #hbw-brew ' ) );
+    var refs = document.querySelectorAll( '#hbw-reference ' + fences.join( ', #hbw-reference ' ) );
+    var diffs = 0;
+    var maxDiff = 0;
+    var pairs = Math.min( ours.length, refs.length );
+    var i;
+    var j;
+
+    if ( !pairs ) {
+        verdict.textContent = 'Style parity: no comparable elements (harness brew changed?)';
+        return;
+    }
+
+    for ( i = 0; i < pairs; i++ ) {
+        var oursStyle = window.getComputedStyle( ours[ i ] );
+        var refsStyle = window.getComputedStyle( refs[ i ] );
+        for ( j = 0; j < props.length; j++ ) {
+            var oursValue = oursStyle.getPropertyValue( props[ j ] );
+            var refsValue = refsStyle.getPropertyValue( props[ j ] );
+            if ( oursValue === refsValue ) {
+                continue;
+            }
+            diffs += 1;
+            var oursPx = parseFloat( oursValue );
+            var refsPx = parseFloat( refsValue );
+            var magnitude = 1;
+            if ( !isNaN( oursPx ) && !isNaN( refsPx ) ) {
+                magnitude = Math.abs( oursPx - refsPx );
+            }
+            if ( magnitude > maxDiff ) {
+                maxDiff = magnitude;
+            }
+        }
+    }
+
+    verdict.textContent = 'Style parity: ' + diffs + ' differing computed value(s), '
+        + 'maximum difference magnitude ' + maxDiff
+        + ( diffs === 0 ? ' (panes identical)' : '' );
+}
 </script>
 
 <script src="../HomebreweryWiki.render.js"></script>
+<script>
+(function () {
+    if ( document.readyState === 'complete' || document.readyState === 'interactive' ) {
+        hbwStyleParity();
+    } else if ( document.addEventListener ) {
+        document.addEventListener( 'DOMContentLoaded', hbwStyleParity, false );
+    } else {
+        window.onload = hbwStyleParity;
+    }
+}());
+</script>
 </body>
 </html>

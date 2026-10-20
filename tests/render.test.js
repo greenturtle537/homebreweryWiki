@@ -556,6 +556,45 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'side-by-side: no console errors' );
 }() );
 
+// --- E3S2 T4: theme parity extends to computed style values ---
+( function () {
+    var cases = [
+        {
+            source: '<div style="width: 840px;">\n\nBlock content.\n\n</div>\n',
+            needle: 'width: 840px', prop: 'width', expect: '840px'
+        },
+        {
+            source: '<div style="text-align: justify;">\n\nJustified text.\n\n</div>\n',
+            needle: 'text-align: justify', prop: 'text-align', expect: 'justify'
+        },
+        {
+            source: '<div style="background: #123456;">\n\nPainted content.\n\n</div>\n',
+            needle: 'background', prop: 'background-color', expect: 'rgb(18, 52, 86)'
+        }
+    ];
+    var i;
+    for ( i = 0; i < cases.length; i++ ) {
+        ( function ( spec ) {
+            var page = makePage( spec.source, { withHomebrewery: true } );
+            var doc = page.win.document;
+            var rendered = doc.getElementById( 'hbw-brew-rendered' );
+            var styled = rendered ? rendered.querySelector( 'div[style]' ) : null;
+            var value = '';
+            if ( styled && page.win.getComputedStyle ) {
+                value = page.win.getComputedStyle( styled ).getPropertyValue( spec.prop );
+            }
+            ok( !!rendered, 'theme values: ' + spec.needle + ' rendered' );
+            ok( !!styled && styled.textContent !== '',
+                'theme values: styled div wraps its block' );
+            ok( !!styled && styled.getAttribute( 'style' ).indexOf( spec.needle ) !== -1,
+                'theme values: sanitizer keeps ' + spec.needle );
+            ok( !!styled && String( value ).replace( /^\s+|\s+$/g, '' ) === spec.expect,
+                'theme values: ' + spec.prop + ' is ' + spec.expect + ' (got "' + value + '")' );
+            ok( page.errors.length === 0, 'theme values: no console errors (' + spec.needle + ')' );
+        }( cases[ i ] ) );
+    }
+}() );
+
 // --- E3S2 T5: no brew rule matches anything outside the wrapper ---
 ( function () {
     var themeSource = fs.readFileSync(
