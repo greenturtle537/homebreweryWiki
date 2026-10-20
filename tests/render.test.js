@@ -487,31 +487,88 @@ function makePage( source, options ) {
 }() );
 
 // --- E3S2 T4: every theme rule is scoped under .hbw-brew ---
+// Shared extractor: a character-by-character walk records the selector text
+// before each `{` together with its brace depth. Odd-depth text is a
+// declaration and is never a selector, so selectors nested inside one-line
+// at-rules (e.g. `@media screen { body { ... } }`) are inspected regardless
+// of line breaks. At-rule preambles are skipped by their leading `@`.
 ( function () {
+    /**
+     * Return the selector text before every `{`, comments stripped.
+     *
+     * @param {string} css Stylesheet source, comments stripped.
+     * @return {Array.<string>} Selector text in source order.
+     */
+    function extractSelectors( css ) {
+        var raw = {};
+        var buffer = '';
+        var ch;
+        var i;
+        var text;
+        var parts;
+        var j;
+        var selectors = [];
+        for ( i = 0; i < String( css ).length; i++ ) {
+            ch = css.charAt( i );
+            if ( ch === '{' ) {
+                raw[ buffer ] = 1;
+                buffer = '';
+                continue;
+            }
+            if ( ch === '}' ) {
+                buffer = '';
+                continue;
+            }
+            buffer += ch;
+        }
+        for ( text in raw ) {
+            if ( !raw.hasOwnProperty( text ) ) {
+                continue;
+            }
+            text = text.replace( /^\s+|\s+$/g, '' );
+            if ( !text || text.charAt( 0 ) === '@' ) {
+                continue;
+            }
+            parts = text.split( ',' );
+            for ( j = 0; j < parts.length; j++ ) {
+                text = parts[ j ].replace( /^\s+|\s+$/g, '' );
+                if ( text ) {
+                    selectors.push( text );
+                }
+            }
+        }
+        return selectors;
+    }
+
     var themeSource = fs.readFileSync(
         path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
     ).replace( /\/\*[\s\S]*?\*\//g, '' );
-    var ruleMatch = /^\s*([^{}@\/][^{}]*?)\s*\{/gm;
-    var match;
+    var selectors = extractSelectors( themeSource );
     var unscoped = [];
     var bare = /^\s*(html|body|\*|:root)\s*$/i;
+    var i;
+    var leakedAtRule;
 
-    while ( ( match = ruleMatch.exec( themeSource ) ) !== null ) {
-        var parts = match[ 1 ].split( ',' );
-        var i;
-        for ( i = 0; i < parts.length; i++ ) {
-            var selector = parts[ i ].replace( /^\s+|\s+$/g, '' );
-            if ( selector && selector.indexOf( '.hbw-brew' ) !== 0 ) {
-                unscoped.push( selector );
-            }
-            if ( bare.test( selector ) ) {
-                unscoped.push( selector );
-            }
+    for ( i = 0; i < selectors.length; i++ ) {
+        if ( selectors[ i ] && selectors[ i ].indexOf( '.hbw-brew' ) !== 0 ) {
+            unscoped.push( selectors[ i ] );
+        }
+        if ( bare.test( selectors[ i ] ) ) {
+            unscoped.push( selectors[ i ] );
         }
     }
 
+    // Regression: a bare selector hidden inside a one-line at-rule must be
+    // found, not silently skipped.
+    var evilSelectors = extractSelectors( '@media screen { body { color: red; } }' );
+    leakedAtRule = evilSelectors.indexOf( 'body' ) !== -1;
+
+    ok( leakedAtRule, 'theme: audit inspects selectors inside one-line at-rules' );
+    ok( evilSelectors.indexOf( '@media screen' ) === -1,
+        'theme: audit skips at-rule preambles' );
     ok( unscoped.length === 0,
         'theme: every selector is scoped under .hbw-brew (' + unscoped.join( ' | ' ) + ')' );
+    ok( selectors.length > 0, 'theme: stylesheet has rules' );
     ok( !/#hbw-/.test( themeSource ), 'theme: scoping uses the wrapper class, not ids' );
 }() );
 
@@ -529,7 +586,7 @@ function makePage( source, options ) {
     box.innerHTML = raw;
 
     /**
-     * Flatten an element tree to `tag.class>tag.class` for comparison.
+     * Flatten an element tree to `depth:tag.class>…` for comparison.
      *
      * @param {HTMLElement} node Root to walk.
      * @return {string} Structure signature.
@@ -539,11 +596,19 @@ function makePage( source, options ) {
         var out = [];
         var i;
         var classes;
+        var depth;
+        var parent;
         for ( i = 0; i < nodes.length; i++ ) {
             classes = nodes[ i ].className
                 ? '.' + String( nodes[ i ].className ).split( /\s+/ ).join( '.' )
                 : '';
-            out.push( nodes[ i ].nodeName.toLowerCase() + classes );
+            depth = 0;
+            parent = nodes[ i ].parentNode;
+            while ( parent && parent !== node ) {
+                depth++;
+                parent = parent.parentNode;
+            }
+            out.push( depth + ':' + nodes[ i ].nodeName.toLowerCase() + classes );
         }
         return out.join( '>' );
     }
@@ -600,7 +665,68 @@ function makePage( source, options ) {
     var themeSource = fs.readFileSync(
         path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
     ).replace( /\/\*[\s\S]*?\*\//g, '' );
-    var ruleMatch = /^\s*([^{}@\/][^{}]*?)\s*\{/gm;
+    // Same brace-walk extractor as the T4 audit: selector text before every
+    // `{` is inspected, so nested selectors inside one-line at-rules are
+    // found regardless of line breaks; declarations and at-rule preambles
+    // are never selectors.
+    function extractAuditSelectors( auditCss ) {
+        var raw = {};
+        var buffer = '';
+        var ch;
+        var i;
+        var text;
+        var parts;
+        var j;
+        var selectors = [];
+        for ( i = 0; i < String( auditCss ).length; i++ ) {
+            ch = auditCss.charAt( i );
+            if ( ch === '{' ) {
+                raw[ buffer ] = 1;
+                buffer = '';
+                continue;
+            }
+            if ( ch === '}' ) {
+                buffer = '';
+                continue;
+            }
+            buffer += ch;
+        }
+        for ( text in raw ) {
+            if ( !raw.hasOwnProperty( text ) ) {
+                continue;
+            }
+            text = text.replace( /^\s+|\s+$/g, '' );
+            if ( !text || text.charAt( 0 ) === '@' ) {
+                continue;
+            }
+            parts = text.split( ',' );
+            for ( j = 0; j < parts.length; j++ ) {
+                text = parts[ j ].replace( /^\s+|\s+$/g, '' );
+                if ( text ) {
+                    selectors.push( text );
+                }
+            }
+        }
+        return selectors;
+    }
+
+    var selectors = extractAuditSelectors( themeSource );
+
+    // Mixed document: a brew wrapper immediately followed by ordinary page
+    // content, so adjacent-selector escapes (`.hbw-brew + .note`) would fire.
+    var mixed = new JSDOM(
+        '<!doctype html><html><body>'
+        + '<div class="hbw-brew"><div class="hbw-page"><div class="hbw-column">'
+        + '<p>Brew content</p>'
+        + '</div></div></div>'
+        + '<div class="note">page content after the brew</div>'
+        + '<p class="sect1">more content</p>'
+        + '</body></html>',
+        { url: 'http://wiki.example.test/index.php?title=Manual:Test' }
+    );
+    var mixedDoc = mixed.window.document;
+
+    // Plain document with no brew wrapper at all.
     var dom = new JSDOM(
         '<!doctype html><html><body>'
         + '<div id="content"><h1>Plain page</h1><p>Text</p>'
@@ -610,23 +736,22 @@ function makePage( source, options ) {
         { url: 'http://wiki.example.test/index.php?title=Main_Page' }
     );
     var doc = dom.window.document;
-    var match;
     var escaped = [];
+    var k;
+    var hits;
+    var h;
 
-    while ( ( match = ruleMatch.exec( themeSource ) ) !== null ) {
-        var parts = match[ 1 ].split( ',' );
-        var i;
-        for ( i = 0; i < parts.length; i++ ) {
-            var selector = parts[ i ].replace( /^\s+|\s+$/g, '' );
-            if ( !selector ) {
-                continue;
-            }
-            var hits = doc.querySelectorAll( selector );
-            var j;
-            for ( j = 0; j < hits.length; j++ ) {
-                if ( !hits[ j ].closest( '.hbw-brew' ) ) {
-                    escaped.push( selector );
-                }
+    for ( k = 0; k < selectors.length; k++ ) {
+        // Plain fixture: nothing may match.
+        hits = doc.querySelectorAll( selectors[ k ] );
+        for ( h = 0; h < hits.length; h++ ) {
+            escaped.push( selectors[ k ] );
+        }
+        // Mixed fixture: every match must sit inside the wrapper.
+        hits = mixedDoc.querySelectorAll( selectors[ k ] );
+        for ( h = 0; h < hits.length; h++ ) {
+            if ( !hits[ h ].closest( '.hbw-brew' ) ) {
+                escaped.push( selectors[ k ] );
             }
         }
     }

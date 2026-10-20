@@ -348,20 +348,90 @@ t_assert( strpos( $themeCss, '#hbw-brew-rendered' ) === false,
     'E3S2 styles: no id selector; scoping is by wrapper class' );
 t_assert( preg_match( '/^\s*(html|body|\*|:root)\s*[,{]/mi', $themeCss ) === 0,
     'E3S2 styles: no bare html/body/*/:root selectors' );
-t_assert( preg_match_all( '/^\s*([^{}@\/][^{}]*?)\s*\{/m', $themeCss, $sel ) > 0,
-    'E3S2 styles: stylesheet has rules' );
-$unscoped = array();
-foreach ( $sel[1] as $selectorList ) {
-    foreach ( explode( ',', $selectorList ) as $one ) {
+
+// Selector audit (E3S2 code review): a character-by-character walk records
+// the selector text before each `{`. Odd-depth text is a declaration and is
+// never a selector, so selectors nested inside one-line at-rules such as
+// `@media screen { body { ... } }` are inspected regardless of line breaks.
+// At-rule preambles are skipped by their leading `@`.
+$selectors = array();
+$selectorsBuf = '';
+$themeLen = strlen( $themeCss );
+for ( $selectorsI = 0; $selectorsI < $themeLen; $selectorsI++ ) {
+    $selectorsCh = $themeCss[$selectorsI];
+    if ( $selectorsCh === '{' ) {
+        $selectors[$selectorsBuf] = 1;
+        $selectorsBuf = '';
+        continue;
+    }
+    if ( $selectorsCh === '}' ) {
+        $selectorsBuf = '';
+        continue;
+    }
+    $selectorsBuf .= $selectorsCh;
+}
+$selectorsFound = array();
+foreach ( $selectors as $selectorsText => $selectorsDepth ) {
+    $selectorsText = trim( $selectorsText );
+    if ( $selectorsText === '' || strpos( $selectorsText, '@' ) === 0 ) {
+        continue;
+    }
+    foreach ( explode( ',', $selectorsText ) as $one ) {
         $one = trim( $one );
-        if ( $one !== '' && strpos( $one, '.hbw-brew' ) !== 0 ) {
-            $unscoped[] = $one;
+        if ( $one !== '' ) {
+            $selectorsFound[] = $one;
         }
     }
 }
+$selectors = $selectorsFound;
+$unscoped = array();
+foreach ( $selectors as $one ) {
+    if ( strpos( $one, '.hbw-brew' ) !== 0 ) {
+        $unscoped[] = $one;
+    }
+}
+t_assert( count( $selectors ) > 0,
+    'E3S2 styles: stylesheet has rules' );
 t_assert( count( $unscoped ) === 0,
     'E3S2 styles: every rule is scoped under .hbw-brew (found: ' .
     implode( ' | ', $unscoped ) . ')' );
+
+// Regression: a bare selector nested inside a one-line at-rule must be
+// inspected, not silently skipped; an at-rule preamble never is.
+$atRuleCss = '@media screen { body { color: red; } }';
+$atRuleRaw = array();
+$atRuleBuf = '';
+$atRuleLen = strlen( $atRuleCss );
+for ( $atRuleI = 0; $atRuleI < $atRuleLen; $atRuleI++ ) {
+    $atRuleCh = $atRuleCss[$atRuleI];
+    if ( $atRuleCh === '{' ) {
+        $atRuleRaw[$atRuleBuf] = 1;
+        $atRuleBuf = '';
+        continue;
+    }
+    if ( $atRuleCh === '}' ) {
+        $atRuleBuf = '';
+        continue;
+    }
+    $atRuleBuf .= $atRuleCh;
+}
+$atRuleFound = array();
+foreach ( $atRuleRaw as $atRuleText => $atRuleDepth ) {
+    $atRuleText = trim( $atRuleText );
+    if ( $atRuleText === '' || strpos( $atRuleText, '@' ) === 0 ) {
+        continue;
+    }
+    foreach ( explode( ',', $atRuleText ) as $one ) {
+        $one = trim( $one );
+        if ( $one !== '' ) {
+            $atRuleFound[] = $one;
+        }
+    }
+}
+t_assert( in_array( 'body', $atRuleFound ),
+    'E3S2 styles: audit inspects selectors inside one-line at-rules' );
+t_assert( ! in_array( '@media screen', $atRuleFound ),
+    'E3S2 styles: audit skips at-rule preambles' );
 
 // --- E1S2 (kept): hidden source placeholder (T2) ---
 $ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
