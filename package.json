@@ -1,0 +1,11 @@
+{
+  "name": "homebrewerywiki",
+  "private": true,
+  "description": "Test tooling for the HomebreweryWiki MediaWiki extension",
+  "scripts": {
+    "test": "node tests/render.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
+}

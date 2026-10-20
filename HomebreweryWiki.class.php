@@ -96,10 +96,10 @@ class HomebreweryWiki {
     }
 
     /**
-     * Whether the brew view module must load for this request (E1S2T1).
+     * Whether the renderer bundle must load for this request (E1S3T1).
      *
      * Kept a pure predicate so the enqueue rule is unit-testable without an
-     * OutputPage or a live request.  The module loads only for an ordinary
+     * OutputPage or a live request.  The bundle loads only for an ordinary
      * *view* of a brew-namespace page: edit, history, preview (action=submit),
      * purge, diffs, and every non-brew page are excluded.
      *
@@ -108,7 +108,7 @@ class HomebreweryWiki {
      * @param mixed       $diff   Raw 'diff' request value (null when absent).
      * @return bool
      */
-    public static function shouldEnqueueViewModule( $title, $action, $diff ) {
+    public static function shouldEnqueueRenderer( $title, $action, $diff ) {
         if ( !( $title instanceof Title ) ) {
             return false;
         }
@@ -125,8 +125,23 @@ class HomebreweryWiki {
     }
 
     /**
-     * BeforePageDisplay hook.  Loads the brew view module for brew page views
-     * only (E1S2T1).  Non-brew pages, edit/history/preview screens and diffs
+     * Renderer assets in load order (E1S3T1): markdown parser, sanitizer, then
+     * the module that reads the hidden source and fills the pane.  Kept as a
+     * pure list so unit tests can assert the order without an OutputPage.
+     *
+     * @return array Script paths relative to $wgScriptPath.
+     */
+    public static function rendererAssets() {
+        return array(
+            HOMEBREWERYWIKI_MARKED_LIB,
+            HOMEBREWERYWIKI_PURIFY_LIB,
+            HOMEBREWERYWIKI_RENDER_MODULE,
+        );
+    }
+
+    /**
+     * BeforePageDisplay hook.  Loads the renderer bundle for brew page views
+     * only (E1S3T1).  Non-brew pages, edit/history/preview screens and diffs
      * receive no brew module, so nothing outside a brew view is affected.
      *
      * MediaWiki 1.14 signature: ( &$out, &$sk ).
@@ -145,19 +160,21 @@ class HomebreweryWiki {
         $action = $wgRequest->getVal( 'action', 'view' );
         $diff   = $wgRequest->getVal( 'diff' );
 
-        if ( ! self::shouldEnqueueViewModule( $title, $action, $diff ) ) {
+        if ( ! self::shouldEnqueueRenderer( $title, $action, $diff ) ) {
             return true;
         }
 
-        $out->addScriptFile( $wgScriptPath . HOMEBREWERYWIKI_VIEW_MODULE );
+        foreach ( self::rendererAssets() as $asset ) {
+            $out->addScriptFile( $wgScriptPath . $asset );
+        }
         return true;
     }
 
     /**
      * ArticleViewHeader hook.  For a current revision of an existing brew page,
      * emit the raw brew source into a hidden placeholder and suppress the stock
-     * wikitext parse (E1S2, "no raw-markdown flash" - D9).  The view module then
-     * reveals it as plain preformatted text.
+     * wikitext parse (E1S2, "no raw-markdown flash" - D9).  The render module
+     * then replaces the placeholder with sanitized rendered HTML (E1S3).
      *
      * MediaWiki 1.14 signature: ( &$article, &$outputDone, &$pcache ).  This
      * hook fires from Article::view() only, so diffs (and action=raw) never
@@ -205,7 +222,8 @@ class HomebreweryWiki {
      * newline in the saved source.  A <div> text node round-trips exactly.
      * The <noscript> block renders the escaped source for readers with JS off;
      * its <pre> deliberately starts with a sacrificial newline so the parser
-     * strips that one instead of a real leading newline.
+     * strips that one instead of a real leading newline.  With JS on, the
+     * render module also uses this exact source as its render input.
      *
      * @param mixed $text Raw brew markdown.
      * @return string HTML fragment.

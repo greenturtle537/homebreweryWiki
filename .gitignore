@@ -2,3 +2,5 @@
 .sandbox/
 docs/
 marv.sh
+# Node test tooling (E1S3)
+node_modules/
