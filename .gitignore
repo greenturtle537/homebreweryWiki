@@ -10,6 +10,7 @@ build/renderer/upstream/
 
 # Visual regression diff artefacts (E3S5T2); baselines themselves are committed
 tests/visual/baselines/*.diff.png
+tests/parity/goldens/*.diff.png
 
 # Homebrewery theme build scratch + licence-gated binaries (E3.5S2)
 build/theme/upstream/

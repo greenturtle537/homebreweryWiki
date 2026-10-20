@@ -33,6 +33,32 @@ jobs:
       - name: Visual regression (reference brew)
         run: npm run visual
 
+  parity:
+    name: Parity harness (goldens)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install pinned theme fonts and textures
+        run: sh build/theme/fetch-assets.sh
+
+      - name: Install headless Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Goldens are committed. If they are absent the harness skips the pixel
+      # comparison with a clear message and still exits 0.
+      - name: Structural, asset and golden parity
+        run: npm run parity
+
   mw14:
     name: Extension tests (MediaWiki 1.14.1 / PHP 5.6)
     runs-on: ubuntu-latest

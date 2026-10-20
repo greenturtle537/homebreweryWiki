@@ -363,6 +363,20 @@ if ( file_exists( $compiledThemePath ) ) {
     t_assert( strpos( $compiledTheme, 'columnWrapper' ) !== false,
         'E3.5S2 theme: upstream page/column rules compiled' );
 }
+// --- E3.5S6: static shell security contract ---
+$shellPath = $extDir . '/HomebreweryWiki.shell.html';
+t_assert( file_exists( $shellPath ), 'E3.5S6 shell: shell document present' );
+if ( file_exists( $shellPath ) ) {
+    $shellHtml = file_get_contents( $shellPath );
+    t_assert( strpos( $shellHtml, 'Content-Security-Policy' ) !== false &&
+        strpos( $shellHtml, "default-src 'none'" ) !== false,
+        'E3.5S6 shell: CSP denies by default' );
+    t_assert( stripos( $shellHtml, '<script' ) === false,
+        'E3.5S6 shell: no script element' );
+    t_assert( strpos( $shellHtml, 'columnSplit' ) === false,
+        'E3.5S6 shell: no page markup is hard-coded in the shell' );
+}
+
 if ( file_exists( $manifestPath ) ) {
     $manifestLines = file( $manifestPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
     t_assert( count( $manifestLines ) >= 125,
