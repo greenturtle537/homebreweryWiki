@@ -486,6 +486,282 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'fallback renderer: no console errors' );
 }() );
 
+// --- E3S2 T4: every theme rule is scoped under .hbw-brew ---
+// Shared extractor: a character-by-character walk records the selector text
+// before each `{` together with its brace depth. Odd-depth text is a
+// declaration and is never a selector, so selectors nested inside one-line
+// at-rules (e.g. `@media screen { body { ... } }`) are inspected regardless
+// of line breaks. At-rule preambles are skipped by their leading `@`.
+( function () {
+    /**
+     * Return the selector text before every `{`, comments stripped.
+     *
+     * @param {string} css Stylesheet source, comments stripped.
+     * @return {Array.<string>} Selector text in source order.
+     */
+    function extractSelectors( css ) {
+        var raw = {};
+        var buffer = '';
+        var ch;
+        var i;
+        var text;
+        var parts;
+        var j;
+        var selectors = [];
+        for ( i = 0; i < String( css ).length; i++ ) {
+            ch = css.charAt( i );
+            if ( ch === '{' ) {
+                raw[ buffer ] = 1;
+                buffer = '';
+                continue;
+            }
+            if ( ch === '}' ) {
+                buffer = '';
+                continue;
+            }
+            buffer += ch;
+        }
+        for ( text in raw ) {
+            if ( !raw.hasOwnProperty( text ) ) {
+                continue;
+            }
+            text = text.replace( /^\s+|\s+$/g, '' );
+            if ( !text || text.charAt( 0 ) === '@' ) {
+                continue;
+            }
+            parts = text.split( ',' );
+            for ( j = 0; j < parts.length; j++ ) {
+                text = parts[ j ].replace( /^\s+|\s+$/g, '' );
+                if ( text ) {
+                    selectors.push( text );
+                }
+            }
+        }
+        return selectors;
+    }
+
+    var themeSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    ).replace( /\/\*[\s\S]*?\*\//g, '' );
+    var selectors = extractSelectors( themeSource );
+    var unscoped = [];
+    var bare = /^\s*(html|body|\*|:root)\s*$/i;
+    var i;
+    var leakedAtRule;
+
+    for ( i = 0; i < selectors.length; i++ ) {
+        if ( selectors[ i ] && selectors[ i ].indexOf( '.hbw-brew' ) !== 0 ) {
+            unscoped.push( selectors[ i ] );
+        }
+        if ( bare.test( selectors[ i ] ) ) {
+            unscoped.push( selectors[ i ] );
+        }
+    }
+
+    // Regression: a bare selector hidden inside a one-line at-rule must be
+    // found, not silently skipped.
+    var evilSelectors = extractSelectors( '@media screen { body { color: red; } }' );
+    leakedAtRule = evilSelectors.indexOf( 'body' ) !== -1;
+
+    ok( leakedAtRule, 'theme: audit inspects selectors inside one-line at-rules' );
+    ok( evilSelectors.indexOf( '@media screen' ) === -1,
+        'theme: audit skips at-rule preambles' );
+    ok( unscoped.length === 0,
+        'theme: every selector is scoped under .hbw-brew (' + unscoped.join( ' | ' ) + ')' );
+    ok( selectors.length > 0, 'theme: stylesheet has rules' );
+    ok( !/#hbw-/.test( themeSource ), 'theme: scoping uses the wrapper class, not ids' );
+}() );
+
+// --- E3S2 T3: side-by-side structure matches the raw Homebrewery output ---
+( function () {
+    var source = '# Reference\n\n'
+        + '<div class="note">\n\nA **note** body.\n\n</div>\n\n'
+        + '| a | b |\n|---|---|\n| 1 | 2 |\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var column = rendered ? rendered.querySelector( '.hbw-page .hbw-column' ) : null;
+    var raw = page.win.HomebreweryRenderer.render( source, 0 );
+    var box = page.win.document.createElement( 'div' );
+
+    box.innerHTML = raw;
+
+    /**
+     * Flatten an element tree to `depth:tag.class>…` for comparison.
+     *
+     * @param {HTMLElement} node Root to walk.
+     * @return {string} Structure signature.
+     */
+    function structure( node ) {
+        var nodes = node.querySelectorAll( '*' );
+        var out = [];
+        var i;
+        var classes;
+        var depth;
+        var parent;
+        for ( i = 0; i < nodes.length; i++ ) {
+            classes = nodes[ i ].className
+                ? '.' + String( nodes[ i ].className ).split( /\s+/ ).join( '.' )
+                : '';
+            depth = 0;
+            parent = nodes[ i ].parentNode;
+            while ( parent && parent !== node ) {
+                depth++;
+                parent = parent.parentNode;
+            }
+            out.push( depth + ':' + nodes[ i ].nodeName.toLowerCase() + classes );
+        }
+        return out.join( '>' );
+    }
+
+    ok( !!column, 'side-by-side: our pane renders the reference brew' );
+    ok( !!column && structure( column ) === structure( box ),
+        'side-by-side: element structure matches Homebrewery' );
+    ok( !!column && column.textContent === box.textContent,
+        'side-by-side: text content matches Homebrewery' );
+    ok( page.errors.length === 0, 'side-by-side: no console errors' );
+}() );
+
+// --- E3S2 T4: theme parity extends to computed style values ---
+( function () {
+    var cases = [
+        {
+            source: '<div style="width: 840px;">\n\nBlock content.\n\n</div>\n',
+            needle: 'width: 840px', prop: 'width', expect: '840px'
+        },
+        {
+            source: '<div style="text-align: justify;">\n\nJustified text.\n\n</div>\n',
+            needle: 'text-align: justify', prop: 'text-align', expect: 'justify'
+        },
+        {
+            source: '<div style="background: #123456;">\n\nPainted content.\n\n</div>\n',
+            needle: 'background', prop: 'background-color', expect: 'rgb(18, 52, 86)'
+        }
+    ];
+    var i;
+    for ( i = 0; i < cases.length; i++ ) {
+        ( function ( spec ) {
+            var page = makePage( spec.source, { withHomebrewery: true } );
+            var doc = page.win.document;
+            var rendered = doc.getElementById( 'hbw-brew-rendered' );
+            var styled = rendered ? rendered.querySelector( 'div[style]' ) : null;
+            var value = '';
+            if ( styled && page.win.getComputedStyle ) {
+                value = page.win.getComputedStyle( styled ).getPropertyValue( spec.prop );
+            }
+            ok( !!rendered, 'theme values: ' + spec.needle + ' rendered' );
+            ok( !!styled && styled.textContent !== '',
+                'theme values: styled div wraps its block' );
+            ok( !!styled && styled.getAttribute( 'style' ).indexOf( spec.needle ) !== -1,
+                'theme values: sanitizer keeps ' + spec.needle );
+            ok( !!styled && String( value ).replace( /^\s+|\s+$/g, '' ) === spec.expect,
+                'theme values: ' + spec.prop + ' is ' + spec.expect + ' (got "' + value + '")' );
+            ok( page.errors.length === 0, 'theme values: no console errors (' + spec.needle + ')' );
+        }( cases[ i ] ) );
+    }
+}() );
+
+// --- E3S2 T5: no brew rule matches anything outside the wrapper ---
+( function () {
+    var themeSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    ).replace( /\/\*[\s\S]*?\*\//g, '' );
+    // Same brace-walk extractor as the T4 audit: selector text before every
+    // `{` is inspected, so nested selectors inside one-line at-rules are
+    // found regardless of line breaks; declarations and at-rule preambles
+    // are never selectors.
+    function extractAuditSelectors( auditCss ) {
+        var raw = {};
+        var buffer = '';
+        var ch;
+        var i;
+        var text;
+        var parts;
+        var j;
+        var selectors = [];
+        for ( i = 0; i < String( auditCss ).length; i++ ) {
+            ch = auditCss.charAt( i );
+            if ( ch === '{' ) {
+                raw[ buffer ] = 1;
+                buffer = '';
+                continue;
+            }
+            if ( ch === '}' ) {
+                buffer = '';
+                continue;
+            }
+            buffer += ch;
+        }
+        for ( text in raw ) {
+            if ( !raw.hasOwnProperty( text ) ) {
+                continue;
+            }
+            text = text.replace( /^\s+|\s+$/g, '' );
+            if ( !text || text.charAt( 0 ) === '@' ) {
+                continue;
+            }
+            parts = text.split( ',' );
+            for ( j = 0; j < parts.length; j++ ) {
+                text = parts[ j ].replace( /^\s+|\s+$/g, '' );
+                if ( text ) {
+                    selectors.push( text );
+                }
+            }
+        }
+        return selectors;
+    }
+
+    var selectors = extractAuditSelectors( themeSource );
+
+    // Mixed document: a brew wrapper immediately followed by ordinary page
+    // content, so adjacent-selector escapes (`.hbw-brew + .note`) would fire.
+    var mixed = new JSDOM(
+        '<!doctype html><html><body>'
+        + '<div class="hbw-brew"><div class="hbw-page"><div class="hbw-column">'
+        + '<p>Brew content</p>'
+        + '</div></div></div>'
+        + '<div class="note">page content after the brew</div>'
+        + '<p class="sect1">more content</p>'
+        + '</body></html>',
+        { url: 'http://wiki.example.test/index.php?title=Manual:Test' }
+    );
+    var mixedDoc = mixed.window.document;
+
+    // Plain document with no brew wrapper at all.
+    var dom = new JSDOM(
+        '<!doctype html><html><body>'
+        + '<div id="content"><h1>Plain page</h1><p>Text</p>'
+        + '<img src="/x.png"><table><tr><td>c</td></tr></table>'
+        + '<div class="note">not a brew</div>'
+        + '</div></body></html>',
+        { url: 'http://wiki.example.test/index.php?title=Main_Page' }
+    );
+    var doc = dom.window.document;
+    var escaped = [];
+    var k;
+    var hits;
+    var h;
+
+    for ( k = 0; k < selectors.length; k++ ) {
+        // Plain fixture: nothing may match.
+        hits = doc.querySelectorAll( selectors[ k ] );
+        for ( h = 0; h < hits.length; h++ ) {
+            escaped.push( selectors[ k ] );
+        }
+        // Mixed fixture: every match must sit inside the wrapper.
+        hits = mixedDoc.querySelectorAll( selectors[ k ] );
+        for ( h = 0; h < hits.length; h++ ) {
+            if ( !hits[ h ].closest( '.hbw-brew' ) ) {
+                escaped.push( selectors[ k ] );
+            }
+        }
+    }
+
+    ok( escaped.length === 0,
+        'no-leak: no theme rule matches outside .hbw-brew (' + escaped.join( ' | ' ) + ')' );
+    ok( doc.querySelectorAll( '.hbw-brew' ).length === 0,
+        'no-leak: the non-brew fixture has no brew wrapper at all' );
+}() );
+
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );

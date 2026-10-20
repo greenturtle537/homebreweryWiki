@@ -334,6 +334,105 @@ t_assert( strpos( HOMEBREWERYWIKI_MARKED_LIB, '0.3.19' ) !== false,
 t_assert( strpos( HOMEBREWERYWIKI_PURIFY_LIB, '2.5.8' ) !== false,
     'E1S3 assets: DOMPurify version pinned' );
 
+// --- E3S2T4/T5: scoped theme stylesheet ---
+$styles = HomebreweryWiki::rendererStyles();
+t_assert( count( $styles ) === 1, 'E3S2 styles: one theme stylesheet' );
+t_assert( $styles[0] === HOMEBREWERYWIKI_THEME_CSS,
+    'E3S2 styles: theme stylesheet is the brew theme' );
+$relTheme = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_THEME_CSS );
+t_assert( file_exists( $extDir . '/' . $relTheme ),
+    'E3S2 styles: theme stylesheet present' );
+$themeCss = file_get_contents( $extDir . '/' . $relTheme );
+$themeCss = preg_replace( '!/\*.*?\*/!s', '', $themeCss );
+t_assert( strpos( $themeCss, '#hbw-brew-rendered' ) === false,
+    'E3S2 styles: no id selector; scoping is by wrapper class' );
+t_assert( preg_match( '/^\s*(html|body|\*|:root)\s*[,{]/mi', $themeCss ) === 0,
+    'E3S2 styles: no bare html/body/*/:root selectors' );
+
+// Selector audit (E3S2 code review): a character-by-character walk records
+// the selector text before each `{`. Odd-depth text is a declaration and is
+// never a selector, so selectors nested inside one-line at-rules such as
+// `@media screen { body { ... } }` are inspected regardless of line breaks.
+// At-rule preambles are skipped by their leading `@`.
+$selectors = array();
+$selectorsBuf = '';
+$themeLen = strlen( $themeCss );
+for ( $selectorsI = 0; $selectorsI < $themeLen; $selectorsI++ ) {
+    $selectorsCh = $themeCss[$selectorsI];
+    if ( $selectorsCh === '{' ) {
+        $selectors[$selectorsBuf] = 1;
+        $selectorsBuf = '';
+        continue;
+    }
+    if ( $selectorsCh === '}' ) {
+        $selectorsBuf = '';
+        continue;
+    }
+    $selectorsBuf .= $selectorsCh;
+}
+$selectorsFound = array();
+foreach ( $selectors as $selectorsText => $selectorsDepth ) {
+    $selectorsText = trim( $selectorsText );
+    if ( $selectorsText === '' || strpos( $selectorsText, '@' ) === 0 ) {
+        continue;
+    }
+    foreach ( explode( ',', $selectorsText ) as $one ) {
+        $one = trim( $one );
+        if ( $one !== '' ) {
+            $selectorsFound[] = $one;
+        }
+    }
+}
+$selectors = $selectorsFound;
+$unscoped = array();
+foreach ( $selectors as $one ) {
+    if ( strpos( $one, '.hbw-brew' ) !== 0 ) {
+        $unscoped[] = $one;
+    }
+}
+t_assert( count( $selectors ) > 0,
+    'E3S2 styles: stylesheet has rules' );
+t_assert( count( $unscoped ) === 0,
+    'E3S2 styles: every rule is scoped under .hbw-brew (found: ' .
+    implode( ' | ', $unscoped ) . ')' );
+
+// Regression: a bare selector nested inside a one-line at-rule must be
+// inspected, not silently skipped; an at-rule preamble never is.
+$atRuleCss = '@media screen { body { color: red; } }';
+$atRuleRaw = array();
+$atRuleBuf = '';
+$atRuleLen = strlen( $atRuleCss );
+for ( $atRuleI = 0; $atRuleI < $atRuleLen; $atRuleI++ ) {
+    $atRuleCh = $atRuleCss[$atRuleI];
+    if ( $atRuleCh === '{' ) {
+        $atRuleRaw[$atRuleBuf] = 1;
+        $atRuleBuf = '';
+        continue;
+    }
+    if ( $atRuleCh === '}' ) {
+        $atRuleBuf = '';
+        continue;
+    }
+    $atRuleBuf .= $atRuleCh;
+}
+$atRuleFound = array();
+foreach ( $atRuleRaw as $atRuleText => $atRuleDepth ) {
+    $atRuleText = trim( $atRuleText );
+    if ( $atRuleText === '' || strpos( $atRuleText, '@' ) === 0 ) {
+        continue;
+    }
+    foreach ( explode( ',', $atRuleText ) as $one ) {
+        $one = trim( $one );
+        if ( $one !== '' ) {
+            $atRuleFound[] = $one;
+        }
+    }
+}
+t_assert( in_array( 'body', $atRuleFound ),
+    'E3S2 styles: audit inspects selectors inside one-line at-rules' );
+t_assert( ! in_array( '@media screen', $atRuleFound ),
+    'E3S2 styles: audit skips at-rule preambles' );
+
 // --- E1S2 (kept): hidden source placeholder (T2) ---
 $ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
 t_assert( strpos( $ph, 'class="hbw-brew"' ) !== false, 'E1S2 placeholder: scoping wrapper present' );
