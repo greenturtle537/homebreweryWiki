@@ -27,6 +27,12 @@ jobs:
       - run: npm ci
       - run: npm test
 
+      # The visual baseline renders with the production theme, whose 5e fonts
+      # and textures are licence-gated and not committed (E3.5S2). Without
+      # them the harness sees 404s and fails the "no console errors" check.
+      - name: Install pinned theme fonts and textures
+        run: sh build/theme/fetch-assets.sh
+
       - name: Install headless Chromium
         run: npx playwright install --with-deps chromium
 
