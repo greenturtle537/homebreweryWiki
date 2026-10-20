@@ -26,6 +26,12 @@ The script fetches the pinned upstream files into `build/renderer/upstream/`
 runs esbuild. Compare the printed SHA-256 with `vendor/README.md`; if it
 changed, update the manifest entry.
 
+It also copies the notices for the code embedded in the bundle next to the
+artifact: Homebrewery (`LICENSE`), marked (`LICENSE.marked`) and lodash
+(`LICENSE.lodash`). `--legal-comments=none` keeps those banners out of the
+minified output, so the files are the only attribution the vendored bundle
+ships with.
+
 ## Notes
 
 - `--main-fields=module,main` is mandatory. Without it, several `marked-*`

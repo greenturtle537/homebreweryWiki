@@ -40,5 +40,12 @@ npx esbuild entry.js \
 	--banner:js="/*! Homebrewery $PIN markdown renderer (vendor bundle). Upstream: https://github.com/naturalcrit/homebrewery tag $PIN, shared/markdown.js. MIT. Built with esbuild; see build/renderer/README.md. */" \
 	--outfile="$DIR/../../vendor/homebrewery-3.21.0/renderer.min.js"
 
+# The bundle embeds Homebrewery, marked and lodash; ship their notices next to
+# the artifact (the --legal-comments=none build keeps them out of the bundle).
 cp "$UP/LICENSE" "$DIR/../../vendor/homebrewery-3.21.0/LICENSE"
+cp "$DIR/node_modules/marked/LICENSE.md" \
+	"$DIR/../../vendor/homebrewery-3.21.0/LICENSE.marked"
+cp "$DIR/node_modules/lodash/LICENSE" \
+	"$DIR/../../vendor/homebrewery-3.21.0/LICENSE.lodash"
+
 echo "built vendor/homebrewery-3.21.0/renderer.min.js"

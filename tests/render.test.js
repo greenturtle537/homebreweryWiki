@@ -119,6 +119,11 @@ function makePage( source, options ) {
             return JSON.parse( JSON.stringify( value ) );
         };
         win.eval( homebrewerySource );
+        if ( options.pinnedThrows ) {
+            win.HomebreweryRenderer.render = function () {
+                throw new Error( 'pinned renderer exploded' );
+            };
+        }
     }
     if ( options.withLibs !== false ) {
         win.eval( markedSource );
@@ -438,6 +443,37 @@ function makePage( source, options ) {
         text.indexOf( 'landscape' ) === -1,
         'aliases: marker text and attributes do not leak' );
     ok( page.errors.length === 0, 'aliases: no console errors' );
+}() );
+
+// --- E3S2 review: a thrown pinned renderer falls back to marked ---
+( function () {
+    var source = '# Still Here\n\nbody text\n';
+    var page = makePage( source, { withHomebrewery: true, pinnedThrows: true } );
+    var doc = page.win.document;
+    var rendered = doc.getElementById( 'hbw-brew-rendered' );
+
+    ok( !!rendered, 'pinned throw: content still rendered' );
+    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
+        'pinned throw: marked fallback is reported' );
+    ok( !!rendered && !!rendered.querySelector( 'h1' ),
+        'pinned throw: fallback produced the heading' );
+    ok( page.errors.length === 0, 'pinned throw: no console errors' );
+}() );
+
+// --- E3S2 review: one render per page keeps variables across columns ---
+( function () {
+    var source = '[str]: 18\n\n# Stats\n\nSTR $[str]\n\n\\columnbreak\n\nAgain $[str]\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var columns = pages.length ? pages[0].querySelectorAll( '.hbw-column' ) : [];
+
+    ok( columns.length === 2, 'page state: column break made two columns' );
+    ok( columns.length === 2 && columns[0].textContent.indexOf( '18' ) !== -1,
+        'page state: first column resolves the variable' );
+    ok( columns.length === 2 && columns[1].textContent.indexOf( '18' ) !== -1,
+        'page state: second column still resolves the variable' );
+    ok( page.errors.length === 0, 'page state: no console errors' );
 }() );
 
 // --- Degraded path still reports the fallback renderer when the bundle is absent ---
