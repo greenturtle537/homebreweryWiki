@@ -947,6 +947,45 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'fenced definitions: no console errors' );
 }() );
 
+// --- E3B1: a definition may contain inline code without losing its body ---
+( function () {
+    var source = 'Cites alpha.[^a]\n\n'
+        + '[^a]: uses `code` inline.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+
+    ok( refs.length === 1 && refs[0].getAttribute( 'href' ) === '#hbw-fn-1-a',
+        'code in note: prose reference links its note' );
+    ok( notes.length === 1, 'code in note: one note emitted' );
+    ok( notes.length === 1 && notes[0].textContent.indexOf( 'uses' ) !== -1 &&
+        notes[0].textContent.indexOf( 'code' ) !== -1,
+        'code in note: note body keeps prose and code text' );
+    ok( page.errors.length === 0, 'code in note: no console errors' );
+}() );
+
+// --- E3B1: an unclosed fence runs to the end of the page ---
+( function () {
+    var source = 'Before.[^a]\n\n'
+        + '```\n'
+        + 'still code [^b]\n'
+        + '[^b]: not a note\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 0, 'unclosed fence: no reference in prose, so none links' );
+    ok( notes.length === 0, 'unclosed fence: code definition is not a note' );
+    ok( text.indexOf( 'still code [^b]' ) !== -1,
+        'unclosed fence: code body renders' );
+    // The pinned renderer itself drops a trailing definition-shaped line in
+    // an unclosed fence at EOF; a closed fence keeps it (covered above).
+    ok( page.errors.length === 0, 'unclosed fence: no console errors' );
+}() );
+
 // --- E3S3 T2: data-* hygiene on the hardened tree ---
 ( function () {
     var source = '<div data-evil="1" data-hbw-footnote="kept">content</div>\n';
