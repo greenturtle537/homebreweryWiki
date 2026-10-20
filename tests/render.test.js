@@ -889,54 +889,10 @@ function offOriginFetches( win, root ) {
     } ), 'theme: ids appear only in print-mode isolation rules' );
 }() );
 
-// --- E3S2 T3: side-by-side structure matches the raw Homebrewery output ---
-( function () {
-    var source = '# Reference\n\n'
-        + '<div class="note">\n\nA **note** body.\n\n</div>\n\n'
-        + '| a | b |\n|---|---|\n| 1 | 2 |\n';
-    var page = makePage( source, { withHomebrewery: true } );
-    var rendered = renderRoot( page );
-    var column = rendered ? rendered.querySelector( '.page > .columnWrapper' ) : null;
-    var raw = page.win.HomebreweryRenderer.render( source, 0 );
-    var box = page.win.document.createElement( 'div' );
-
-    box.innerHTML = raw;
-
-    /**
-     * Flatten an element tree to `depth:tag.class>…` for comparison.
-     *
-     * @param {HTMLElement} node Root to walk.
-     * @return {string} Structure signature.
-     */
-    function structure( node ) {
-        var nodes = node.querySelectorAll( '*' );
-        var out = [];
-        var i;
-        var classes;
-        var depth;
-        var parent;
-        for ( i = 0; i < nodes.length; i++ ) {
-            classes = nodes[ i ].className
-                ? '.' + String( nodes[ i ].className ).split( /\s+/ ).join( '.' )
-                : '';
-            depth = 0;
-            parent = nodes[ i ].parentNode;
-            while ( parent && parent !== node ) {
-                depth++;
-                parent = parent.parentNode;
-            }
-            out.push( depth + ':' + nodes[ i ].nodeName.toLowerCase() + classes );
-        }
-        return out.join( '>' );
-    }
-
-    ok( !!column, 'side-by-side: our pane renders the reference brew' );
-    ok( !!column && structure( column ) === structure( box ),
-        'side-by-side: element structure matches Homebrewery' );
-    ok( !!column && column.textContent === box.textContent,
-        'side-by-side: text content matches Homebrewery' );
-    ok( page.errors.length === 0, 'side-by-side: no console errors' );
-}() );
+// --- E3B5 / E3.5S5: the old side-by-side harness is retired ---
+// Comparing the extension against the raw renderer under the same CSS proved
+// only that the renderer matches itself. Structural parity now lives in the
+// iframe assertions above and the real-app golden harness (tests/parity/).
 
 // --- E3S2 T4: theme parity extends to computed style values ---
 ( function () {
@@ -1628,6 +1584,81 @@ function offOriginFetches( win, root ) {
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );
+
+
+// --- E3.5S6: iframe security profile ---
+( function () {
+    var shell = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.shell.html' ), 'utf8'
+    );
+    var page;
+    var frame;
+    var doc;
+    var host;
+    var anchors;
+    var i;
+
+    ok( /Content-Security-Policy/.test( shell ) &&
+        /default-src 'none'/.test( shell ),
+        'security: shell CSP denies everything by default' );
+    ok( /img-src 'self' data:/.test( shell ),
+        'security: shell CSP allows same-origin images only' );
+    ok( /font-src 'self'/.test( shell ) && /style-src 'self'/.test( shell ),
+        'security: shell CSP scopes fonts/styles to the same origin' );
+    ok( !/<script/i.test( shell ),
+        'security: shell contains no script element' );
+
+    page = makePage( fs.readFileSync(
+        path.join( root, 'tests', 'fixtures', 'attack-brew.md' ), 'utf8'
+    ), { withHomebrewery: true } );
+    frame = frameOf( page );
+    doc = frameDocOf( page );
+    host = hostOf( page );
+
+    ok( !!frame && frame.getAttribute( 'sandbox' ) ===
+        'allow-same-origin allow-top-navigation-by-user-activation',
+        'security: iframe sandbox is same-origin + user-activated top nav' );
+    ok( !!frame && frame.getAttribute( 'sandbox' ).indexOf( 'allow-scripts' ) === -1,
+        'security: iframe sandbox never allows scripts' );
+    ok( !!frame && /camera 'none'/.test( frame.getAttribute( 'allow' ) || '' ),
+        'security: iframe permissions policy denies device features' );
+    ok( !!frame && frame.getAttribute( 'referrerpolicy' ) === 'no-referrer',
+        'security: iframe sends no referrer' );
+
+    ok( !!doc && !doc.querySelector( 'script, meta, base, form, iframe, object, embed' ),
+        'security: active elements are stripped inside the iframe' );
+    // The only style element is the parent's fit rule; the only link is the
+    // configured theme. Nothing else can be injected.
+    ok( !!doc && doc.querySelectorAll( 'style' ).length === 1 &&
+        doc.querySelector( 'style' ).id === 'hbw-fit',
+        'security: only the parent fit rule is present' );
+    ok( !!doc && doc.querySelectorAll( 'link[rel="stylesheet"]' ).length <= 1,
+        'security: at most the configured theme stylesheet is linked' );
+    ok( !!doc && !doc.querySelector( 'svg' ),
+        'security: inline SVG is stripped inside the iframe' );
+
+    // Author-supplied targets are overridden: the brew cannot choose where it
+    // navigates, and it cannot navigate the frame on its own.
+    anchors = doc ? doc.querySelectorAll( 'a' ) : [];
+    i = 0;
+    while ( i < anchors.length && anchors[ i ].getAttribute( 'target' ) === '_top' ) {
+        i++;
+    }
+    ok( anchors.length > 0 && i === anchors.length,
+        'security: every anchor is forced to target=_top (' + anchors.length + ')' );
+
+    // No user HTML in the parent: only the frame remains after render.
+    ok( !!host && !host.querySelector( '.page, .brewRenderer, img, script' ),
+        'security: parent host holds no rendered user HTML' );
+    ok( !!host && host.getAttribute( 'data-hbw-render' ) === 'html',
+        'security: render path is the iframe path' );
+
+    // External images stay blocked inside the frame.
+    ok( !!doc && !doc.querySelector( 'img[src^="http://evil"], img[src^="https://evil"]' ),
+        'security: external image sources are stripped in the iframe' );
+    ok( page.errors.length === 0,
+        'security: hostile brew raises no console errors' );
+}() );
 
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );
