@@ -616,6 +616,11 @@
      * become markers; anything without one (including `[^nope]`) stays
      * verbatim so readers see the source text instead of a broken link.
      *
+     * Known limitation (E3B1, deferred to end of epic): a `[^label]` inside
+     * fenced or inline code still becomes a marker here, so code placed
+     * before prose can donate a note body to a later definition.  See
+     * https://trello.com/c/yOXKeyb2/175-e3b1-bug-footnote-refs-inside-code-link-to-the-wrong-note
+     *
      * @param {string} pageSource page source
      * @param {Object.<string, string>} notes footnote bodies by label
      * @return {string} page source with markers
