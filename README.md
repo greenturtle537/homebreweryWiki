@@ -45,6 +45,14 @@ MediaWiki 1.14's `$wgNamespaceProtection` is deliberately **not** used — it is
 checked for every action, including `read`, and would make brew pages
 unreadable to anonymous visitors.
 
+### Uploads
+
+Only logged-in (admin-created) accounts hold the `upload` right. The file
+policy is raster-only (`png`, `jpg`, `jpeg`, `gif`, `webp`); SVG is excluded
+because it can carry script (Q14). Extension checks and the strict allowlist
+are enabled, uploads are capped at 10 MB, and `$wgEnableUploads` is turned on
+because MediaWiki 1.14 ships with local uploads disabled.
+
 ## Build & test
 
 Syntax check:

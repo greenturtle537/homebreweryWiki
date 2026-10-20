@@ -421,5 +421,37 @@ t_assert( count( $brewGateTitle->getUserPermissionsErrors( 'read', $anon ) ) ===
           count( $mainGateTitle->getUserPermissionsErrors( 'read', $anon ) ) === 0,
     'E2S1 perms: anonymous read allowed on brew and normal pages' );
 
+// --- E2S2: trusted-only image uploads (T1-T2) ---
+// Upload is a trusted-editor action, and the file policy is raster-only.
+global $wgFileExtensions, $wgCheckFileExtensions, $wgStrictFileExtensions, $wgMaxUploadSize;
+
+t_assert( isset( $wgGroupPermissions['*']['upload'] ) &&
+          $wgGroupPermissions['*']['upload'] === false,
+    'E2S2 upload: anonymous group denied the upload right' );
+t_assert( !empty( $wgGroupPermissions['user']['upload'] ),
+    'E2S2 upload: trusted group holds the upload right' );
+t_assert( $anon->isAllowed( 'upload' ) === false,
+    'E2S2 upload: anonymous user cannot upload' );
+t_assert( $trusted->isAllowed( 'upload' ) === true,
+    'E2S2 upload: trusted user can upload' );
+
+t_assert( in_array( 'png', $wgFileExtensions ) &&
+          in_array( 'jpg', $wgFileExtensions ) &&
+          in_array( 'jpeg', $wgFileExtensions ) &&
+          in_array( 'gif', $wgFileExtensions ) &&
+          in_array( 'webp', $wgFileExtensions ),
+    'E2S2 file policy: raster types allowed' );
+t_assert( in_array( 'svg', $wgFileExtensions ) === false,
+    'E2S2 file policy: SVG disallowed' );
+t_assert( $wgCheckFileExtensions === true,
+    'E2S2 file policy: extension checks enabled' );
+t_assert( $wgStrictFileExtensions === true,
+    'E2S2 file policy: strict extension allowlist enabled' );
+t_assert( is_int( $wgMaxUploadSize ) && $wgMaxUploadSize > 0 &&
+          $wgMaxUploadSize <= 20 * 1024 * 1024,
+    'E2S2 size policy: upload size bounded at 20 MB or less' );
+t_assert( $wgEnableUploads === true,
+    'E2S2 upload: local uploads enabled for the trusted editors' );
+
 echo "\n$pass passed, $fail failed\n";
 exit( $fail > 0 ? 1 : 0 );
