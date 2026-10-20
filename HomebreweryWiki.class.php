@@ -560,6 +560,48 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Existence map for the wiki-link targets in brew source (E4S1T3).
+	 *
+	 * The renderer runs inside a script-free iframe, so it cannot ask the
+	 * server whether a target exists; the parent supplies the answer with the
+	 * placeholder.  Keys are the target titles with whitespace collapsed to
+	 * underscores, matching the href the renderer emits.  A target MediaWiki
+	 * cannot resolve at all is reported as missing, which is what the red
+	 * link promises.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array Map of normalized target title => boolean exists.
+	 */
+	public static function brewLinkMap( $text ) {
+		$map = array();
+		foreach ( self::brewLinkTargets( $text ) as $target ) {
+			$key = preg_replace( '/\s+/', '_', $target );
+			$exists = false;
+			if ( class_exists( 'Title' ) ) {
+				$title = Title::newFromText( $target );
+				$exists = ( $title instanceof Title && $title->exists() );
+			}
+			$map[$key] = $exists;
+		}
+		return $map;
+	}
+
+	/**
+	 * JSON form of the wiki-link existence map (E4S1T3).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return string JSON object, safe to place in an HTML attribute.
+	 */
+	public static function brewLinkMapJson( $text ) {
+		$map = self::brewLinkMap( $text );
+		if ( !function_exists( 'json_encode' ) ) {
+			return '{}';
+		}
+		$json = json_encode( $map );
+		return ( $json === false ) ? '{}' : $json;
+	}
+
+	/**
 	 * Resolve `[[File:...]]` tokens to same-origin upload URLs (E3.5S3T3).
 	 *
 	 * The client cannot derive MediaWiki's hashed upload paths, so the server
@@ -936,7 +978,8 @@ class HomebreweryWiki {
                . ' data-hbw-page-width="215.9"'
                . ' data-hbw-page-height="279.4"'
                . ' data-hbw-wiki-base="' . htmlspecialchars( self::wikiBaseUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
-               . ' data-hbw-files="' . htmlspecialchars( self::brewFileMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"';
+               . ' data-hbw-files="' . htmlspecialchars( self::brewFileMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"'
+               . ' data-hbw-links="' . htmlspecialchars( self::brewLinkMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"';
         if ( $print ) {
             $attrs .= ' data-hbw-print="1"';
         }

@@ -128,6 +128,9 @@ function makePage( source, options ) {
         if ( options.files !== undefined ) {
             hostAttrs += ' data-hbw-files="' + escapeHtml( JSON.stringify( options.files ) ) + '"';
         }
+        if ( options.links !== undefined ) {
+            hostAttrs += ' data-hbw-links="' + escapeHtml( JSON.stringify( options.links ) ) + '"';
+        }
         if ( options.print ) {
             hostAttrs += ' data-hbw-print="1"';
         }
@@ -1494,6 +1497,30 @@ function offOriginFetches( win, root ) {
         hrefs.indexOf( base + 'Code_Page' ) === -1,
         'wiki tokens: fenced code stays literal' );
     ok( page.errors.length === 0, 'wiki tokens: no console errors' );
+}() );
+
+// --- E4S1T3: existing targets stay blue, missing targets go red ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Links\n\n'
+        + 'See [[Page]] and [[Missing Page|gone]] and [[Unmapped|plain]].\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base,
+        links: { 'Page': true, 'Missing_Page': false }
+    } );
+    var rendered = renderRoot( page );
+    var existing = rendered ? rendered.querySelector( 'a[href="' + base + 'Page"]' ) : null;
+    var missing = rendered ? rendered.querySelector( 'a[href="' + base + 'Missing_Page"]' ) : null;
+    var unmapped = rendered ? rendered.querySelector( 'a[href="' + base + 'Unmapped"]' ) : null;
+
+    ok( !!existing && !existing.className,
+        'red links: an existing target keeps the plain (blue) link' );
+    ok( !!missing && ( ' ' + missing.className + ' ' ).indexOf( ' new ' ) !== -1,
+        'red links: a missing target gets the new class' );
+    ok( !!unmapped && !unmapped.className,
+        'red links: an unmapped target is never guessed red' );
+    ok( page.errors.length === 0, 'red links: no console errors' );
 }() );
 
 // --- E3.5S3 T1: wiki tokens inside inline code stay literal ---

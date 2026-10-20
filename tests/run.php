@@ -720,6 +720,22 @@ t_assert( array_key_exists( 'url', $fileMap['HbwTestMissing.png'] ) &&
     is_string( $fileMap['HbwTestMissing.png']['url'] ),
     'E3.5 file map: each entry carries a url string' );
 
+// --- E4S1T3: link existence map (blue vs red) ---
+$linkMap = HomebreweryWiki::brewLinkMap( $linkText );
+$expectedMain = Title::newFromText( 'Main Page' )->exists();
+t_assert( isset( $linkMap['Main_Page'] ) && $linkMap['Main_Page'] === $expectedMain,
+    'E4S1T3 link map: existence matches Title::exists()' );
+t_assert( isset( $linkMap['Page_Two'] ) && $linkMap['Page_Two'] === false,
+    'E4S1T3 link map: a missing target reports exists=false' );
+t_assert( !isset( $linkMap['E35_Test'] ) && !isset( $linkMap['Name.png'] ),
+    'E4S1T3 link map: categories and files stay out of the map' );
+$linkMapJson = HomebreweryWiki::brewLinkMapJson( $linkText );
+t_assert( strpos( $linkMapJson, '"Main_Page":' ) !== false,
+    'E4S1T3 link map: JSON keeps the normalized key' );
+$linkMapCode = HomebreweryWiki::brewLinkMap( "`[[Hidden Page]]`\n\n[[Shown Page]]\n" );
+t_assert( !isset( $linkMapCode['Hidden_Page'] ) && isset( $linkMapCode['Shown_Page'] ),
+    'E4S1T3 link map: code spans never donate a target' );
+
 // --- E3.5S3: code spans and fences never donate source tokens ---
 $codeText = "`[[Category:Hidden]]` stays literal\n"
     . "\n"
@@ -781,6 +797,8 @@ t_assert( strpos( $phWiki, 'data-hbw-wiki-base="' ) !== false,
     'E3.5 placeholder: wiki base attribute emitted' );
 t_assert( strpos( $phWiki, 'data-hbw-files="' ) !== false,
     'E3.5 placeholder: file map attribute emitted' );
+t_assert( strpos( $phWiki, 'data-hbw-links="' ) !== false,
+    'E4S1T3 placeholder: link map attribute emitted' );
 t_assert( strpos( $phWiki, 'HbwTestMissing.png' ) !== false,
     'E3.5 placeholder: referenced file appears in the map' );
 
@@ -809,6 +827,13 @@ if ( $saveTitle instanceof Title ) {
 
     $pageId = $saveTitle->getArticleID();
     t_assert( $pageId > 0, 'E3.5 integration: saved page has an id' );
+
+    // E4S1T3: a saved page exists, so a link to it resolves blue.
+    $selfMap = HomebreweryWiki::brewLinkMap( '[[' . $saveTitle->getPrefixedText() . ']]' );
+    t_assert(
+        $selfMap[ str_replace( ' ', '_', $saveTitle->getPrefixedText() ) ] === true,
+        'E4S1T3 link map: a page that exists reports exists=true'
+    );
 
     $db = wfGetDB( DB_MASTER );
     // categorylinks stores the DB key (underscores), not the display name.
