@@ -311,6 +311,19 @@ class HomebreweryWiki {
 		);
 	}
 
+	/**
+	 * Stylesheets in load order (E3S2T4). Every rule in the theme is scoped
+	 * under `.hbw-brew`, so it is only enqueued where the renderer is
+	 * enqueued (brew view / brew preview) and cannot reach other pages.
+	 *
+	 * @return array Style paths relative to $wgScriptPath.
+	 */
+	public static function rendererStyles() {
+		return array(
+			HOMEBREWERYWIKI_THEME_CSS,
+		);
+	}
+
     /**
      * BeforePageDisplay hook.  Loads the renderer bundle for brew page views
      * (E1S3T1) and brew edit previews (E1S4).  Non-brew pages, plain edit,
@@ -340,6 +353,9 @@ class HomebreweryWiki {
 
         foreach ( self::rendererAssets() as $asset ) {
             $out->addScriptFile( $wgScriptPath . $asset );
+        }
+        foreach ( self::rendererStyles() as $style ) {
+            $out->addStyle( $wgScriptPath . $style, 'screen' );
         }
         return true;
     }

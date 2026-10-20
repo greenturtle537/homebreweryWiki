@@ -1,0 +1,49 @@
+/**
+ * Brew theme styles (E3S2T4 / E3S2T5).
+ *
+ * Every selector is scoped under the single wrapper class `.hbw-brew` (Q25),
+ * so loading this stylesheet on a brew page cannot touch MonoBook, the wiki
+ * chrome, or any other namespace. There are deliberately no bare element,
+ * `html`, `body`, `:root` or `*` selectors: the T5 scoping audit fails the
+ * build if one sneaks in.
+ *
+ * This is the structural layer only (page/column blocks, media, tables).
+ * The D&D-manual visual theme, including Homebrewery's fonts and artwork,
+ * is Epic E's job because those assets need licence review (Q23 / E4).
+ */
+
+.hbw-brew {
+    overflow-wrap: break-word;
+}
+
+.hbw-brew .hbw-page {
+    margin: 0 0 1.5em;
+}
+
+.hbw-brew .hbw-page:last-child {
+    margin-bottom: 0;
+}
+
+.hbw-brew .hbw-column {
+    max-width: 100%;
+}
+
+.hbw-brew .hbw-column + .hbw-column {
+    margin-top: 1em;
+}
+
+/* Defensive: the pinned renderer emits this marker for a column break; the
+ * module normally consumes it. It must never show up as content. */
+.hbw-brew .columnSplit {
+    display: none;
+}
+
+.hbw-brew img {
+    max-width: 100%;
+    height: auto;
+}
+
+.hbw-brew table {
+    border-collapse: collapse;
+    max-width: 100%;
+}

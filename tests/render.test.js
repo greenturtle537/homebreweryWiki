@@ -486,6 +486,76 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'fallback renderer: no console errors' );
 }() );
 
+// --- E3S2 T4: every theme rule is scoped under .hbw-brew ---
+( function () {
+    var themeSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    ).replace( /\/\*[\s\S]*?\*\//g, '' );
+    var ruleMatch = /^\s*([^{}@\/][^{}]*?)\s*\{/gm;
+    var match;
+    var unscoped = [];
+    var bare = /^\s*(html|body|\*|:root)\s*$/i;
+
+    while ( ( match = ruleMatch.exec( themeSource ) ) !== null ) {
+        var parts = match[ 1 ].split( ',' );
+        var i;
+        for ( i = 0; i < parts.length; i++ ) {
+            var selector = parts[ i ].replace( /^\s+|\s+$/g, '' );
+            if ( selector && selector.indexOf( '.hbw-brew' ) !== 0 ) {
+                unscoped.push( selector );
+            }
+            if ( bare.test( selector ) ) {
+                unscoped.push( selector );
+            }
+        }
+    }
+
+    ok( unscoped.length === 0,
+        'theme: every selector is scoped under .hbw-brew (' + unscoped.join( ' | ' ) + ')' );
+    ok( !/#hbw-/.test( themeSource ), 'theme: scoping uses the wrapper class, not ids' );
+}() );
+
+// --- E3S2 T3: side-by-side structure matches the raw Homebrewery output ---
+( function () {
+    var source = '# Reference\n\n'
+        + '<div class="note">\n\nA **note** body.\n\n</div>\n\n'
+        + '| a | b |\n|---|---|\n| 1 | 2 |\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var column = rendered ? rendered.querySelector( '.hbw-page .hbw-column' ) : null;
+    var raw = page.win.HomebreweryRenderer.render( source, 0 );
+    var box = page.win.document.createElement( 'div' );
+
+    box.innerHTML = raw;
+
+    /**
+     * Flatten an element tree to `tag.class>tag.class` for comparison.
+     *
+     * @param {HTMLElement} node Root to walk.
+     * @return {string} Structure signature.
+     */
+    function structure( node ) {
+        var nodes = node.querySelectorAll( '*' );
+        var out = [];
+        var i;
+        var classes;
+        for ( i = 0; i < nodes.length; i++ ) {
+            classes = nodes[ i ].className
+                ? '.' + String( nodes[ i ].className ).split( /\s+/ ).join( '.' )
+                : '';
+            out.push( nodes[ i ].nodeName.toLowerCase() + classes );
+        }
+        return out.join( '>' );
+    }
+
+    ok( !!column, 'side-by-side: our pane renders the reference brew' );
+    ok( !!column && structure( column ) === structure( box ),
+        'side-by-side: element structure matches Homebrewery' );
+    ok( !!column && column.textContent === box.textContent,
+        'side-by-side: text content matches Homebrewery' );
+    ok( page.errors.length === 0, 'side-by-side: no console errors' );
+}() );
+
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );

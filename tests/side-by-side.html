@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HomebreweryWiki — side-by-side reference check (E3S2T3)</title>
+<!--
+  Dev-only harness (E3S2T3). Not served by the extension and not part of the
+  wiki. Open this file from a checkout to compare, side by side:
+
+    left  - the extension's pipeline (pinned renderer, sanitizer,
+            page/column blocks) through HomebreweryWiki.render.js
+    right - the raw pinned Homebrewery renderer output for the same source
+
+  The right pane is deliberately unsanitized so structure can be compared
+  with the left; never copy this pattern into a wiki page.
+-->
+<link rel="stylesheet" href="../HomebreweryWiki.theme.css">
+<style>
+    body { font-family: sans-serif; margin: 1.5em; }
+    .panes { display: flex; gap: 1.5em; align-items: flex-start; }
+    .pane { flex: 1 1 0; min-width: 0; border: 1px solid #bbb; padding: 1em; }
+    .pane h2 { margin-top: 0; font-size: 1em; text-transform: uppercase; letter-spacing: .05em; }
+</style>
+</head>
+<body>
+<h1>Side-by-side reference check</h1>
+<p>
+    Left: this extension. Right: Homebrewery's own renderer, same source.
+    The automated structural comparison lives in <code>tests/render.test.js</code>.
+</p>
+
+<div class="panes">
+    <section class="pane">
+        <h2>HomebreweryWiki pane</h2>
+        <div class="hbw-brew" id="hbw-brew">
+            <div class="hbw-source" id="hbw-source" style="display:none"></div>
+        </div>
+    </section>
+    <section class="pane">
+        <h2>Homebrewery (raw renderer)</h2>
+        <div class="hbw-brew" id="hbw-reference"></div>
+    </section>
+</div>
+
+<script>
+var HBW_BREW = [
+    '# Reference Brew',
+    '',
+    '<div class="note">',
+    '',
+    'A note block with **bold** and `code`.',
+    '',
+    '</div>',
+    '',
+    '| Roll | Result |',
+    '|------|--------|',
+    '| 1-5  | Nothing |',
+    '| 6    | Something |',
+    '',
+    '\\page',
+    '',
+    '# Page Two',
+    '',
+    '<div class="descriptive">',
+    '',
+    'A descriptive box.',
+    '',
+    '</div>',
+    '',
+    '\\column',
+    '',
+    'Second column text.'
+].join('\n');
+
+document.getElementById('hbw-source').textContent = HBW_BREW;
+</script>
+
+<script src="../vendor/marked-0.3.19.min.js"></script>
+<script src="../vendor/dompurify-2.5.8.min.js"></script>
+<script src="../vendor/homebrewery-3.21.0/renderer.min.js"></script>
+
+<script>
+document.getElementById('hbw-reference').innerHTML =
+    '<div class="hbw-page"><div class="hbw-column">' +
+    window.HomebreweryRenderer.render(HBW_BREW.split(/^\s*\\page\s*$/m)[0], 0) +
+    '</div></div>' +
+    '<div class="hbw-page"><div class="hbw-column">' +
+    window.HomebreweryRenderer.render(HBW_BREW.split(/^\s*\\page\s*$/m)[1], 1) +
+    '</div></div>';
+</script>
+
+<script src="../HomebreweryWiki.render.js"></script>
+</body>
+</html>

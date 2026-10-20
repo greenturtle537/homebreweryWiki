@@ -334,6 +334,35 @@ t_assert( strpos( HOMEBREWERYWIKI_MARKED_LIB, '0.3.19' ) !== false,
 t_assert( strpos( HOMEBREWERYWIKI_PURIFY_LIB, '2.5.8' ) !== false,
     'E1S3 assets: DOMPurify version pinned' );
 
+// --- E3S2T4/T5: scoped theme stylesheet ---
+$styles = HomebreweryWiki::rendererStyles();
+t_assert( count( $styles ) === 1, 'E3S2 styles: one theme stylesheet' );
+t_assert( $styles[0] === HOMEBREWERYWIKI_THEME_CSS,
+    'E3S2 styles: theme stylesheet is the brew theme' );
+$relTheme = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_THEME_CSS );
+t_assert( file_exists( $extDir . '/' . $relTheme ),
+    'E3S2 styles: theme stylesheet present' );
+$themeCss = file_get_contents( $extDir . '/' . $relTheme );
+$themeCss = preg_replace( '!/\*.*?\*/!s', '', $themeCss );
+t_assert( strpos( $themeCss, '#hbw-brew-rendered' ) === false,
+    'E3S2 styles: no id selector; scoping is by wrapper class' );
+t_assert( preg_match( '/^\s*(html|body|\*|:root)\s*[,{]/mi', $themeCss ) === 0,
+    'E3S2 styles: no bare html/body/*/:root selectors' );
+t_assert( preg_match_all( '/^\s*([^{}@\/][^{}]*?)\s*\{/m', $themeCss, $sel ) > 0,
+    'E3S2 styles: stylesheet has rules' );
+$unscoped = array();
+foreach ( $sel[1] as $selectorList ) {
+    foreach ( explode( ',', $selectorList ) as $one ) {
+        $one = trim( $one );
+        if ( $one !== '' && strpos( $one, '.hbw-brew' ) !== 0 ) {
+            $unscoped[] = $one;
+        }
+    }
+}
+t_assert( count( $unscoped ) === 0,
+    'E3S2 styles: every rule is scoped under .hbw-brew (found: ' .
+    implode( ' | ', $unscoped ) . ')' );
+
 // --- E1S2 (kept): hidden source placeholder (T2) ---
 $ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
 t_assert( strpos( $ph, 'class="hbw-brew"' ) !== false, 'E1S2 placeholder: scoping wrapper present' );

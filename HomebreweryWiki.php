@@ -38,6 +38,7 @@ define( 'HOMEBREWERYWIKI_HOMEBREWERY_LIB', '/extensions/HomebreweryWiki/vendor/h
 define( 'HOMEBREWERYWIKI_MARKED_LIB', '/extensions/HomebreweryWiki/vendor/marked-0.3.19.min.js' );
 define( 'HOMEBREWERYWIKI_PURIFY_LIB', '/extensions/HomebreweryWiki/vendor/dompurify-2.5.8.min.js' );
 define( 'HOMEBREWERYWIKI_RENDER_MODULE', '/extensions/HomebreweryWiki/HomebreweryWiki.render.js' );
+define( 'HOMEBREWERYWIKI_THEME_CSS', '/extensions/HomebreweryWiki/HomebreweryWiki.theme.css' );
 
 /**
  * Extension credits (MediaWiki 1.14 shape).
