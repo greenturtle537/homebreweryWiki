@@ -4,3 +4,6 @@ docs/
 marv.sh
 # Node test tooling (E1S3)
 node_modules/
+
+# Homebrewery renderer build scratch (E3S2T1)
+build/renderer/upstream/

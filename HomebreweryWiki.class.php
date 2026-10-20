@@ -293,20 +293,23 @@ class HomebreweryWiki {
         return true;
     }
 
-    /**
-     * Renderer assets in load order (E1S3T1): markdown parser, sanitizer, then
-     * the module that reads the hidden source and fills the pane.  Kept as a
-     * pure list so unit tests can assert the order without an OutputPage.
-     *
-     * @return array Script paths relative to $wgScriptPath.
-     */
-    public static function rendererAssets() {
-        return array(
-            HOMEBREWERYWIKI_MARKED_LIB,
-            HOMEBREWERYWIKI_PURIFY_LIB,
-            HOMEBREWERYWIKI_RENDER_MODULE,
-        );
-    }
+	/**
+	 * Renderer assets in load order (E1S3T1, pinned renderer E3S2T1):
+	 * the pinned Homebrewery v3 renderer, the marked fallback for browsers
+	 * that cannot parse it, the sanitizer, then the module that reads the
+	 * hidden source and fills the pane. Kept as a pure list so unit tests can
+	 * assert order without OutputPage.
+	 *
+	 * @return array Script paths relative to $wgScriptPath.
+	 */
+	public static function rendererAssets() {
+		return array(
+			HOMEBREWERYWIKI_HOMEBREWERY_LIB,
+			HOMEBREWERYWIKI_MARKED_LIB,
+			HOMEBREWERYWIKI_PURIFY_LIB,
+			HOMEBREWERYWIKI_RENDER_MODULE,
+		);
+	}
 
     /**
      * BeforePageDisplay hook.  Loads the renderer bundle for brew page views

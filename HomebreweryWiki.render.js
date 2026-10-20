@@ -9,9 +9,11 @@
  * markup contract (DESIGN D3).
  *
  * Load order (legacy addScriptFile, MW 1.14 has no ResourceLoader):
- *   1. vendor/marked-0.3.19.min.js   markdown -> HTML
- *   2. vendor/dompurify-2.5.8.min.js  HTML sanitizer (D7)
- *   3. this file                     render + inject into the pane
+ *   1. vendor/homebrewery-3.21.0/renderer.min.js  pinned Homebrewery v3 renderer
+ *      (E3S2T1; defines window.HomebreweryRenderer)
+ *   2. vendor/marked-0.3.19.min.js   degraded fallback if (1) cannot run
+ *   3. vendor/dompurify-2.5.8.min.js  HTML sanitizer (D7)
+ *   4. this file                     render + inject into the pane
  *
  * Sanitization baseline (DESIGN.md D7 / SECURITY-REVIEW.md F1-F3):
  *   - remove <script>, <iframe>, <object>, <embed>, <form>, <style>,
@@ -36,16 +38,48 @@
     var COLUMN_CLASS = 'hbw-column';
 
     /**
-     * A Homebrewery split marker on a line of its own (Q18 / E3S1).
+     * Page marker on a line of its own (Q18 / E3S1).
      *
-     * `\page` starts a new page block, `\column` starts a new column inside
-     * the current page.  Optional attributes after the token (Homebrewery
-     * allows e.g. `\page [landscape]`) are consumed with the marker, so no
-     * marker text can reach the rendered content.
+     * `\page` / `\pagebreak`, with the optional `{ ... }` attribute form from
+     * upstream's `PAGEBREAK_REGEX_V3`
+     * (`/^(?=\\page(?:break)?(?: *{[^\n{}]*})?$)/m`).  The whole line is
+     * consumed so no marker text can reach the rendered content.
      *
      * @type {RegExp}
      */
-    var SPLIT_MARKER = /^[ \t]*\\(page|column)(?:[ \t].*)?$/;
+    var PAGE_MARKER = /^[ \t]*\\(?:page|pagebreak)(?:[ \t]*\{[^\n{}]*\})?[ \t]*$/;
+
+    /**
+     * Column marker on a line of its own.  Only used for the degraded
+     * `marked` path: the pinned renderer turns this into its own
+     * `<div class="columnSplit">` inside the page (see renderPages).
+     *
+     * @type {RegExp}
+     */
+    var COLUMN_MARKER = /^[ \t]*\\(?:column|columnbreak)(?:[ \t]*\{[^\n{}]*\})?[ \t]*$/;
+
+    /**
+     * The marker the pinned renderer emits for a column break.
+     *
+     * @type {RegExp}
+     */
+    var RENDERED_COLUMN_SPLIT = /<div[^>]*class=["']columnSplit["'][^>]*>\s*<\/div>/gi;
+
+    /**
+     * Version of the pinned Homebrewery renderer vendored in
+     * vendor/homebrewery-3.21.0/ (E3S2T1).
+     *
+     * @type {string}
+     */
+    var HOMEBREWERY_VERSION = '3.21.0';
+
+    /**
+     * Which renderer produced the current output, for the container's
+     * `data-hbw-renderer` marker.
+     *
+     * @type {string|null}
+     */
+    var activeRenderer = null;
 
     var SANITIZE_CONFIG = {
         FORBID_TAGS: [
@@ -270,23 +304,42 @@
      * Render markdown to sanitized HTML.  Returns null when the renderer or
      * sanitizer is unavailable (caller then uses the plain-text fallback).
      *
-     * @param {string} text raw brew source
+     * The pinned Homebrewery renderer (E3S2T1) is preferred; the older
+     * `marked` bundle is kept as the degraded path for browsers that cannot
+     * parse the modern bundle.
+     *
+     * @param {string} text       raw brew source
+     * @param {number} pageNumber zero-based page index (Homebrewery variable)
      * @return {string|null}
      */
-    function renderMarkdown( text ) {
+    function renderMarkdown( text, pageNumber ) {
         var purifier = window.DOMPurify;
+        var homebrewery = window.HomebreweryRenderer;
         var renderer = window.marked;
-        var html;
+        var html = null;
 
         if ( !purifier || typeof purifier.sanitize !== 'function' ) {
             return null;
         }
 
-        if ( typeof renderer === 'function' ) {
+        if ( homebrewery && typeof homebrewery.render === 'function' ) {
+            try {
+                html = homebrewery.render( text, pageNumber || 0 );
+                activeRenderer = 'homebrewery-' + HOMEBREWERY_VERSION;
+            } catch ( e ) {
+                // A pinned-renderer failure must not cost the reader the
+                // content: fall through to the marked bundle.
+                html = null;
+            }
+        }
+
+        if ( html === null && typeof renderer === 'function' ) {
             html = renderer( text );
-        } else if ( renderer && typeof renderer.parse === 'function' ) {
+            activeRenderer = 'marked-0.3.19';
+        } else if ( html === null && renderer && typeof renderer.parse === 'function' ) {
             html = renderer.parse( text );
-        } else {
+            activeRenderer = 'marked-0.3.19';
+        } else if ( html === null ) {
             return null;
         }
 
@@ -302,73 +355,109 @@
     }
 
     /**
-     * Split brew source into Homebrewery page/column segments (E3S1).
+     * Split text on marker lines, dropping the marker lines themselves.
      *
-     * A page is an array of column sources; the result is an array of pages in
-     * document order.  Marker lines are removed, so the returned text is ready
-     * to render.  A brew without markers yields exactly one page with one
-     * column, which keeps the "one page block per brew page" contract uniform.
-     *
-     * @param {string} text raw brew source
-     * @return {Array.<Array.<string>>} pages -> columns -> source
+     * @param {string} text   source text
+     * @param {RegExp} marker marker matcher
+     * @return {Array.<string>} segments in document order
      */
-    function splitBrew( text ) {
+    function splitOnMarker( text, marker ) {
         var lines = String( text ).split( /\r\n|\r|\n/ );
-        var pages = [];
-        var columns = [];
+        var parts = [];
         var current = [];
-        var marker;
         var i;
 
         for ( i = 0; i < lines.length; i++ ) {
-            marker = SPLIT_MARKER.exec( lines[ i ] );
-            if ( !marker ) {
+            if ( marker.test( lines[ i ] ) ) {
+                parts.push( current.join( '\n' ) );
+                current = [];
+            } else {
                 current.push( lines[ i ] );
-                continue;
-            }
-
-            columns.push( current.join( '\n' ) );
-            current = [];
-
-            if ( marker[ 1 ] === 'page' ) {
-                pages.push( columns );
-                columns = [];
             }
         }
 
-        columns.push( current.join( '\n' ) );
-        pages.push( columns );
-
-        return pages;
+        parts.push( current.join( '\n' ) );
+        return parts;
     }
 
     /**
-     * Render every column, returning pages of sanitized HTML.  Returns null
-     * when the renderer bundle is unavailable for any segment, so the caller
-     * can fall back to the plain-text view for the whole brew.
+     * Split brew source into page sources (E3S1).  A brew without page
+     * markers yields one page, so "one page block per brew page" holds
+     * uniformly.
      *
-     * @param {Array.<Array.<string>>} pages pages -> columns -> source
+     * @param {string} text raw brew source
+     * @return {Array.<string>} page sources in document order
+     */
+    function splitPages( text ) {
+        return splitOnMarker( text, PAGE_MARKER );
+    }
+
+    /**
+     * Split one page source into column sources.  Only the degraded `marked`
+     * path needs this; the pinned renderer handles `\column` itself.
+     *
+     * @param {string} page page source
+     * @return {Array.<string>} column sources in document order
+     */
+    function splitColumns( page ) {
+        return splitOnMarker( page, COLUMN_MARKER );
+    }
+
+    /**
+     * Split rendered page HTML at the pinned renderer's columnSplit markers.
+     *
+     * @param {string} html sanitized page HTML
+     * @return {Array.<string>} column HTML in document order
+     */
+    function splitRenderedColumns( html ) {
+        return String( html ).split( RENDERED_COLUMN_SPLIT );
+    }
+
+    /**
+     * Render pages to sanitized HTML (E3S1 + E3S2T1).
+     *
+     * A page is rendered in a single call so the pinned renderer's per-page
+     * state (variable definitions, heading ids) spans all of its columns; the
+     * rendered columnSplit markers are then turned into column blocks.  The
+     * `marked` fallback has no column support, so it renders each column from
+     * the source instead.
+     *
+     * @param {Array.<string>} pages page sources
      * @return {Array.<Array.<string>>|null} pages -> columns -> HTML
      */
     function renderPages( pages ) {
         var renderedPages = [];
         var renderedColumns;
+        var columns;
+        var columnHtml;
         var html;
-        var page;
-        var column;
         var p;
         var c;
 
         for ( p = 0; p < pages.length; p++ ) {
-            page = pages[ p ];
+            html = renderMarkdown( pages[ p ], p );
+            if ( html === null ) {
+                return null;
+            }
+
+            if ( activeRenderer === 'homebrewery-' + HOMEBREWERY_VERSION ) {
+                renderedPages.push( splitRenderedColumns( html ) );
+                continue;
+            }
+
+            columns = splitColumns( pages[ p ] );
+            if ( columns.length === 1 ) {
+                renderedPages.push( [ html ] );
+                continue;
+            }
+
             renderedColumns = [];
-            for ( c = 0; c < page.length; c++ ) {
-                column = page[ c ];
-                html = renderMarkdown( column );
-                if ( html === null ) {
+            for ( c = 0; c < columns.length; c++ ) {
+                columnHtml = renderMarkdown( columns[ c ], p );
+                if ( columnHtml === null ) {
                     return null;
                 }
-                renderedColumns.push( html );
+                renderedColumns.push( columnHtml );
             }
             renderedPages.push( renderedColumns );
         }
@@ -394,6 +483,9 @@
         container.className = RENDERED_CLASS;
         container.id = RENDERED_ID;
         container.setAttribute( 'data-hbw-render', 'html' );
+        if ( activeRenderer ) {
+            container.setAttribute( 'data-hbw-renderer', activeRenderer );
+        }
 
         for ( p = 0; p < renderedPages.length; p++ ) {
             pageNode = document.createElement( 'div' );
@@ -432,8 +524,10 @@
         var renderedPages = null;
         var rendered = null;
 
+        activeRenderer = null;
+
         try {
-            renderedPages = renderPages( splitBrew( text ) );
+            renderedPages = renderPages( splitPages( text ) );
         } catch ( e ) {
             renderedPages = null;
         }
