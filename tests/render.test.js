@@ -897,6 +897,37 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'odd labels: no console errors' );
 }() );
 
+// --- E3S3 review: code before prose, tagged fences, inline code ---
+( function () {
+    var source = '```markdown\n[^a]: inside a tagged fence\n```\n\n'
+        + 'Real prose cites alpha.[^b]\n\n'
+        + 'Inline `code [^c]` stays literal.\n\n'
+        + '[^a]: the fence note.\n\n'
+        + '[^b]: the alpha note.\n\n'
+        + '[^c]: inline code is not a reference.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 1, 'code skipping: only the prose reference links' );
+    ok( refs.length === 1 &&
+        refs[0].getAttribute( 'href' ) === '#hbw-fn-1-b',
+        'code skipping: the prose marker keeps its note, not the fence one' );
+    ok( notes.length === 1 &&
+        notes[0].getAttribute( 'id' ) === 'hbw-fn-1-b' &&
+        notes[0].textContent.indexOf( 'alpha' ) !== -1,
+        'code skipping: one note, the right one' );
+    ok( text.indexOf( '[^a]: inside a tagged fence' ) !== -1,
+        'code skipping: tagged fence content renders untouched' );
+    ok( text.indexOf( 'code [^c]' ) !== -1,
+        'code skipping: inline code renders untouched' );
+    ok( text.indexOf( '[^b]: the alpha note' ) === -1,
+        'code skipping: the real definition never renders as body text' );
+    ok( page.errors.length === 0, 'code skipping: no console errors' );
+}() );
+
 // --- E3S3 review: definitions inside fenced code are sample text, not notes ---
 ( function () {
     var source = 'Before the fence.[^demo]\n\n'
@@ -914,6 +945,18 @@ function makePage( source, options ) {
     ok( text.indexOf( '[^demo]: example' ) !== -1,
         'fenced definitions: fenced text renders untouched' );
     ok( page.errors.length === 0, 'fenced definitions: no console errors' );
+}() );
+
+// --- E3S3 T2: data-* hygiene on the hardened tree ---
+( function () {
+    var source = '<div data-evil="1" data-hbw-footnote="kept">content</div>\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var divs = rendered ? rendered.querySelectorAll( 'div[data-evil]' ) : [];
+
+    ok( !!rendered, 'data hygiene: content rendered' );
+    ok( divs.length === 0, 'data hygiene: author data-* attributes are stripped' );
+    ok( page.errors.length === 0, 'data hygiene: no console errors' );
 }() );
 
 // --- ES5 floor (Q19): module source stays ES5 ---

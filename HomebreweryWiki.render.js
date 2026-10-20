@@ -99,6 +99,9 @@
             'svg'
         ],
         FORBID_ATTR: [ 'srcdoc', 'formaction', 'poster', 'srcset', 'background' ],
+        // Author data-* attributes carry no value for readers and are
+        // stripped.  Footnote markers are recognised by their CSS class-name instead,
+        // so no generated attribute has to survive sanitizing (E3S3T3).
         ALLOW_DATA_ATTR: false
     };
 
@@ -357,7 +360,6 @@
         var box = document.createElement( 'div' );
         box.innerHTML = clean;
         hardenTree( box );
-        box.innerHTML = restoreFencedMarkers( box.innerHTML );
         return box.innerHTML;
     }
 
@@ -411,36 +413,99 @@
     }
 
     /**
-     * Footnote fenced-code marker: an empty, content-free marker span never
-     * flows inside a code fence from our own pipeline, so a span-looking
-     * string inside `<pre><code>` is author text, not a marker.
+     * Create a stateful prose/code walker over one page source (E3S3 review).
      *
-     * @type {RegExp}
+     * Each `next()` returns `{ prose: boolean, text: string }` in source
+     * order: prose runs (split at inline backtick spans), fenced blocks, and
+     * the code spans themselves.  Fences open on up-to-3-spaces plus 3+
+     * backticks/tildes and close on a same-character run of at least the
+     * opening length; unclosed fences run to the end of the page, and an
+     * unmatched backtick leaves the rest of its line as prose.
+     *
+     * @param {string} pageSource page source
+     * @return {Object} walker with a `next()` method
      */
-    var FENCED_MARKER = /<pre><code>((?:(?!<\/code>)[\s\S])*?)<\/code><\/pre>/g;
+    function createProseWalker( pageSource ) {
+        var text = String( pageSource );
+        var lineQueue = null;
+        var fenceChar = null;
+        var fenceLength = 0;
 
-    /**
-     * Strip marker spans that ended up inside fenced code (E3S3 review).
-     *
-     * `markFootnoteRefs` runs on the bare source, so it cannot know which
-     * `[^label]` sit inside a fence; the renderer then turns those spans
-     * into literal code text.  This pass restores the original reference
-     * text inside `<pre><code>` only, so code samples stay byte-identical
-     * while real references elsewhere keep linking.  `[^demo]` becomes the
-     * literal text again; the rest of the fence is untouched.
-     *
-     * @param {string} html rendered HTML
-     * @return {string} HTML with fence markers restored to source text
-     */
-    function restoreFencedMarkers( html ) {
-        return String( html ).replace( FENCED_MARKER, function ( whole, code ) {
-            return '<pre><code>' +
-                code.replace(
-                    /&lt;span class="hbw-footnote-mark" data-hbw-footnote="([^"&]+)"&gt;&lt;\/span&gt;/g,
-                    '[^$1]'
-                ) +
-                '</code></pre>';
-        } );
+        function isFenceClose( line ) {
+            return new RegExp(
+                '^ {0,3}' + fenceChar + '{' + fenceLength + ',}[ \\t]*$'
+            ).test( line );
+        }
+
+        function isFenceOpen( line ) {
+            var found = /^ {0,3}(`{3,}|~{3,})/.exec( line );
+            if ( found ) {
+                fenceChar = found[ 1 ].charAt( 0 );
+                fenceLength = found[ 1 ].length;
+                return true;
+            }
+            return false;
+        }
+
+        return {
+            next: function () {
+                var line;
+                var eol;
+                var lineEnd;
+                var queued;
+                var open;
+                var shut;
+                var codeSpan;
+                var tail;
+                if ( lineQueue !== null ) {
+                    queued = lineQueue.shift();
+                    if ( !lineQueue.length ) {
+                        lineQueue = null;
+                    }
+                    return queued;
+                }
+                if ( text === '' ) {
+                    return null;
+                }
+                lineEnd = text.indexOf( '\n' );
+                if ( lineEnd === -1 ) {
+                    line = text;
+                    eol = '';
+                    text = '';
+                } else {
+                    line = text.substring( 0, lineEnd );
+                    eol = '\n';
+                    text = text.substring( lineEnd + 1 );
+                }
+
+                if ( fenceChar !== null ) {
+                    if ( isFenceClose( line ) ) {
+                        fenceChar = null;
+                        fenceLength = 0;
+                    }
+                    return { prose: false, text: line + eol };
+                }
+                if ( isFenceOpen( line ) ) {
+                    return { prose: false, text: line + eol };
+                }
+
+                open = line.indexOf( '`' );
+                if ( open === -1 ) {
+                    return { prose: true, text: line + eol };
+                }
+                shut = line.indexOf( '`', open + 1 );
+                if ( shut === -1 ) {
+                    return { prose: true, text: line + eol };
+                }
+                codeSpan = line.substring( open, shut + 1 );
+                tail = line.substring( shut + 1 ) + eol;
+                lineQueue = [ { prose: false, text: codeSpan } ];
+                if ( tail !== '' ) {
+                    lineQueue.push( { prose: true, text: tail } );
+                }
+                return { prose: true, text: line.substring( 0, open ) };
+            }
+        };
     }
 
     /**
@@ -456,9 +521,13 @@
     /**
      * Footnote reference (`[^label]`) inside source text.
      *
+     * Matches the literal text form only: once a reference has been swapped
+     * for a marker span the brackets are gone, so a global scan can never
+     * match its own output (which would loop forever).
+     *
      * @type {RegExp}
      */
-    var FOOTNOTE_REF = /\[\^([^\]\s]+)\]/g;
+    var FOOTNOTE_REF = /\[\^([^\]\s<>]+)\]/g;
 
     /**
      * Footnote definition line (`[^label]: note text`), the definition's
@@ -477,67 +546,245 @@
      * the pinned renderer would otherwise rewrite `[^label]` text into its
      * own superscript spans before this extension ever sees them.  Note
      * bodies stay verbatim so bold, links and tables still apply inside the
-     * notes.
+     * notes.  Fenced code blocks and inline code spans are prose-walked too,
+     * so `[^demo]` inside a fence or backticks reaches the renderer
+     * untouched and no code sample can donate a note body.  The open label
+     * survives into later prose steps; at the true end of the page the
+     * caller passes `atPageEnd` so trailing blanks close the definition
+     * instead of trailing into the note.
      *
      * @param {Array.<string>} pages page sources
      * @return {{ pages: Array.<string>, notes: Object.<string, string> }}
      */
+    /*
+     * Scan the lines of one prose step for footnote definitions.
+     * Fences never reach this function: the prose walker keeps them,
+     * so [^demo] inside a fence or backticks can neither donate a
+     * note body nor be stripped from a code sample.
+     *
+     * @param {string} prose prose text
+     * @param {Object.<string, string>} notes note bodies by label
+     * @param {string|null} openLabel label of a definition opened earlier
+     * @param {boolean} atPageEnd true when no more source follows this step
+     * @return {{ text: string, defOpen: string|null }} kept text plus the
+     *         label of a definition still open at the end, if any
+     */
+    function scanProseLines( prose, notes, openLabel, atPageEnd ) {
+        var lines = String( prose ).split( /\n/ );
+        var kept = [];
+        var current = openLabel || null;
+        var match;
+        var i;
+        var next;
+
+        for ( i = 0; i < lines.length; i++ ) {
+
+            // A blank line ends the open definition when the next source
+            // line — inside this step or, at the step end, anywhere later —
+            // starts a new block (non-indented, non-blank text that is not
+            // another definition).  At the step end the walker says whether
+            // more source follows (`atPageEnd`); a definition open at the
+            // true end of the page keeps its trailing blanks as body.
+            if ( current !== null && lines[ i ] === '' ) {
+                next = ( i + 1 < lines.length ) ? lines[ i + 1 ] : null;
+                if ( next === null && !atPageEnd ) {
+                    next = '';
+                }
+                if ( next !== null && next !== '' && !/^[ \t]/.test( next ) &&
+                    !FOOTNOTE_DEF_LINE.test( next ) ) {
+                    current = null;
+                    continue;
+                }
+                notes[ current ] += '\n' + lines[ i ];
+                continue;
+            }
+            if ( current !== null && /^[ \t]+/.test( lines[ i ] ) ) {
+                notes[ current ] += '\n' + lines[ i ];
+                continue;
+            }
+            current = null;
+
+            match = FOOTNOTE_DEF_LINE.exec( lines[ i ] );
+            if ( match ) {
+                current = match[ 1 ];
+                notes[ current ] = match[ 2 ];
+                continue;
+            }
+            kept.push( lines[ i ] );
+        }
+
+        return { text: kept.join( '\n' ), defOpen: current };
+    }
+
+    /**
+     * Whether the walker has any source left after a step (E3S3 review).
+     *
+     * A definition left open at the true end of the page keeps its trailing
+     * blanks as note body; anywhere earlier, a blank line before the next
+     * block closes it.  Code-only tail steps still count as source left.
+     *
+     * @param {Array} marked walker steps
+     * @param {number} i current step index
+     * @return {boolean} true when no steps follow
+     */
+    function atPageEnd( marked, i ) {
+        var j;
+        // Only prose carrying a real line can keep a definition alive: an
+        // open definition followed solely by code or by nothing has no
+        // continuation to absorb, so trailing blanks close it.
+        for ( j = i + 1; j < marked.length; j++ ) {
+            if ( marked[ j ].prose && /[^\n]/.test( marked[ j ].text ) ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Glue walker prose steps back into source lines (E3S3 review).
+     *
+     * The walker splits a line at every inline code span; concatenating the
+     * prose steps restores the original lines, so multi-line constructs
+     * (definition bodies, blank-line rules) scan exactly as written.  Code
+     * steps are excluded here and re-appended by the caller in walk order.
+     *
+     * @param {Array} marked walker steps
+     * @return {string} prose source
+     */
+    function glueProseSteps( marked ) {
+        var out = [];
+        var i;
+        for ( i = 0; i < marked.length; i++ ) {
+            if ( marked[ i ].prose ) {
+                out.push( marked[ i ].text );
+            }
+        }
+        return out.join( '' );
+    }
+
+    /**
+     * Splice verbatim code steps back into scanned prose (E3S3 review).
+     *
+     * The scanned prose is the scanner's output for the glued prose minus
+     * its code steps, so the two strings differ only where the scanner
+     * changed text: at `[^label]:` definition lines, which it drops.  Walk
+     * the glued prose and the scan side by side; unchanged text is copied
+     * from either, code steps pass through verbatim, and the scanner's text
+     * is authoritative everywhere else (references already swapped for
+     * marker spans).  If the two ever disagree structurally, the scanned
+     * text wins for prose and the page stays renderable.
+     *
+     * @param {Array} marked walker steps
+     * @param {string} gluedProse glued prose the scanner saw
+     * @param {string} scannedProse scanner output for the glued prose
+     * @return {string} page source with code restored
+     */
+    function spliceCodeSteps( marked, gluedProse, scannedProse ) {
+        var out = [];
+        var glueCursor = 0;
+        var scanCursor = 0;
+        var i;
+        var stepLen;
+        var anchor;
+        for ( i = 0; i < marked.length; i++ ) {
+            if ( !marked[ i ].prose ) {
+                out.push( marked[ i ].text );
+                continue;
+            }
+            stepLen = marked[ i ].text.length;
+            if ( scannedProse.substring( scanCursor, scanCursor + stepLen ) ===
+                gluedProse.substring( glueCursor, glueCursor + stepLen ) ) {
+                // Unchanged by the scan: copy the scan's version.
+                out.push( scannedProse.substring( scanCursor, scanCursor + stepLen ) );
+                scanCursor += stepLen;
+            } else {
+                // The step changed in the scan: either a dropped
+                // definition line or rewritten reference markers.  Walk
+                // its glued lines and align each against the scan in
+                // order — a line the scan still contains contributes the
+                // scan's version, a missing line contributes nothing.
+                anchor = spliceChangedStep(
+                    marked[ i ].text, scannedProse, scanCursor
+                );
+                out.push( anchor.text );
+                scanCursor = anchor.scanCursor;
+            }
+            glueCursor += stepLen;
+        }
+        out.push( scannedProse.substring( scanCursor ) );
+        return out.join( '' );
+    }
+
+    /**
+     * Align one changed prose step against the scan (E3S3 review).
+     *
+     * The scanner only drops whole `[^label]:` definition lines, so the
+     * glued step's lines and the scan output align in order: a glued line
+     * the scan still contains (at or after the cursor) contributes the
+     * scan's version up to and including it, while a missing line is a
+     * dropped definition and contributes nothing.  Reference markers live
+     * inside surviving lines, so they ride along untouched.
+     *
+     * @param {string} stepText glued prose step
+     * @param {string} scannedProse full scanned prose
+     * @param {number} scanCursor offset of the step in the scanned prose
+     * @return {Object} `{ text, scanCursor }` after the step
+     */
+    function spliceChangedStep( stepText, scannedProse, scanCursor ) {
+        var lines = String( stepText ).split( /\n/ );
+        var out = [];
+        var cursor = scanCursor;
+        var i;
+        var at;
+        for ( i = 0; i < lines.length; i++ ) {
+            if ( lines[ i ] === '' && i + 1 >= lines.length ) {
+                // Trailing split artifact of the step's final newline.
+                continue;
+            }
+            at = scannedProse.indexOf( lines[ i ], cursor );
+            if ( at === -1 ) {
+                continue;
+            }
+            out.push( scannedProse.substring( cursor, at + lines[ i ].length ) );
+            cursor = at + lines[ i ].length;
+        }
+        return { text: out.join( '' ), scanCursor: cursor };
+    }
+
     function extractFootnotes( pages ) {
         var notes = {};
         var cleaned = [];
-        var lines;
-        var kept;
         var current;
-        var fenceChar;
-        var fenceLength;
-        var fence;
-        var match;
+        var walker;
+        var step;
+        var marked;
+        var tailMarked;
         var p;
         var i;
 
         for ( p = 0; p < pages.length; p++ ) {
-            lines = String( pages[ p ] ).split( /\r\n|\r|\n/ );
-            kept = [];
             current = null;
-            fenceChar = null;
-            fenceLength = 0;
-            for ( i = 0; i < lines.length; i++ ) {
-                if ( current !== null &&
-                    ( /^[ \t]+/.test( lines[ i ] ) || lines[ i ] === '' ) ) {
-                    notes[ current ] += '\n' + lines[ i ];
-                    continue;
-                }
-                current = null;
-
-                if ( fenceChar !== null ) {
-                    kept.push( lines[ i ] );
-                    fence = new RegExp(
-                        '^ {0,3}' + fenceChar + '{' + fenceLength + ',}[ \\t]*$'
-                    );
-                    if ( fence.test( lines[ i ] ) ) {
-                        fenceChar = null;
-                        fenceLength = 0;
-                    }
-                    continue;
-                }
-
-                fence = /^ {0,3}(`{3,}|~{3,})/.exec( lines[ i ] );
-                if ( fence ) {
-                    fenceChar = fence[ 1 ].charAt( 0 );
-                    fenceLength = fence[ 1 ].length;
-                    kept.push( lines[ i ] );
-                    continue;
-                }
-
-                match = FOOTNOTE_DEF_LINE.exec( lines[ i ] );
-                if ( match ) {
-                    current = match[ 1 ];
-                    notes[ current ] = match[ 2 ];
-                    continue;
-                }
-                kept.push( lines[ i ] );
+            walker = createProseWalker( pages[ p ] );
+            marked = [];
+            while ( ( step = walker.next() ) !== null ) {
+                marked.push( step );
             }
-            cleaned.push( kept.join( '\n' ) );
+            // Walker splits a line at every code span, so the prose
+            // steps are glued back into source lines before scanning: a
+            // definition opened on one step resumes on the next without
+            // losing its continuation lines.  Code steps never feed the
+            // scanner, so fences and code spans cannot donate note bodies.
+            // Scan the glued prose first (code steps excluded), then
+            // splice the verbatim code steps back into the scanned text at
+            // their original positions.
+            current = null;
+            tailMarked = scanProseLines(
+                glueProseSteps( marked ), notes, current, true
+            );
+            current = tailMarked.defOpen;
+            cleaned.push( spliceCodeSteps(
+                marked, glueProseSteps( marked ), tailMarked.text
+            ) );
         }
 
         return { pages: cleaned, notes: notes };
@@ -602,9 +849,11 @@
     /**
      * Footnote reference marker: `<span class="hbw-footnote-mark"
      * data-hbw-footnote="label">` with no content.  The span survives the
-     * pinned renderer untouched (although DOMPurify drops the attribute), so
-     * references are resolved by walking the source references and the
-     * rendered marker spans side by side in document order.
+     * pinned renderer untouched in prose (although DOMPurify drops the
+     * attribute), so references are resolved by walking the source
+     * references and the rendered marker spans side by side in document
+     * order.  Inside fenced or inline code the renderer escapes the span to
+     * text, which the restore pass below turns back into the source.
      *
      * @type {RegExp}
      */
@@ -615,26 +864,71 @@
      * marker spans (E3S3T3).  Only references with a matching definition
      * become markers; anything without one (including `[^nope]`) stays
      * verbatim so readers see the source text instead of a broken link.
-     *
-     * Known limitation (E3B1, deferred to end of epic): a `[^label]` inside
-     * fenced or inline code still becomes a marker here, so code placed
-     * before prose can donate a note body to a later definition.  See
-     * https://trello.com/c/yOXKeyb2/175-e3b1-bug-footnote-refs-inside-code-link-to-the-wrong-note
+     * Fenced code blocks and inline code spans are never marked: the prose
+     * walker skips them, so `[^demo]` inside a fence or backticks reaches
+     * the renderer untouched (E3B1).
      *
      * @param {string} pageSource page source
      * @param {Object.<string, string>} notes footnote bodies by label
      * @return {string} page source with markers
      */
     function markFootnoteRefs( pageSource, notes ) {
-        return String( pageSource ).replace( FOOTNOTE_REF, function ( whole, label ) {
-            if ( !notes.hasOwnProperty( label ) ) {
-                return whole;
+        var marked = [];
+        var walker = createProseWalker( pageSource );
+        var step;
+
+        while ( ( step = walker.next() ) !== null ) {
+            if ( !step.prose ) {
+                marked.push( step.text );
+                continue;
             }
-            return '<span class="hbw-footnote-mark" data-hbw-footnote="' +
-                label.replace( /&/g, '&amp;' ).replace( /"/g, '&quot;' ) +
-                '"></span>';
-        } );
+            marked.push( String( step.text ).replace( FOOTNOTE_REF, function ( whole, label ) {
+                if ( !notes.hasOwnProperty( label ) ) {
+                    return whole;
+                }
+                return '<span class="hbw-footnote-mark"></span>';
+            } ) );
+        }
+
+        // The walker hands back every character of the source across
+        // its steps (prose and code alike), so joining the marked steps
+        // rebuilds the page exactly.
+        return marked.join( '' );
     }
+
+    /**
+     * Ordered defined references that live in prose, ignoring code (E3B1).
+     *
+     * `markFootnoteRefs` replaces exactly these references with markers, so
+     * this list pairs one-to-one with the rendered markers.  Code that
+     * happens to contain `[^label]` neither becomes a marker nor consumes a
+     * position here.
+     *
+     * @param {string} pageSource page source
+     * @param {Object.<string, string>} notes footnote bodies by label
+     * @return {Array.<string>} labels in document order
+     */
+    function collectProseFootnoteRefs( pageSource, notes ) {
+        var labels = [];
+        var walker = createProseWalker( pageSource );
+        var step;
+        var match;
+
+        while ( ( step = walker.next() ) !== null ) {
+            if ( !step.prose ) {
+                continue;
+            }
+            FOOTNOTE_REF.lastIndex = 0;
+            while ( ( match = FOOTNOTE_REF.exec( step.text ) ) !== null ) {
+                if ( notes.hasOwnProperty( match[ 1 ] ) ) {
+                    labels.push( match[ 1 ] );
+                }
+            }
+        }
+        return labels;
+    }
+
+
 
     /**
      * Resolve footnote references inside one rendered page (E3S3T3).
@@ -669,23 +963,27 @@
         var refLink;
         var refIdUsed = {};
         var markers;
+        var labels;
         var marker;
         var label;
         var i;
+        var marked;
 
-        FOOTNOTE_REF.lastIndex = 0;
-        while ( ( marker = FOOTNOTE_REF.exec( pageSource ) ) !== null ) {
-            label = marker[ 1 ];
-            if ( !notes.hasOwnProperty( label ) || seen[ label ] ) {
+        // Defined references in prose only (E3B1): code refs never became
+        // markers, so they must not take a pairing slot.
+        labels = collectProseFootnoteRefs( pageSource, notes );
+
+        for ( i = 0; i < labels.length; i++ ) {
+            if ( seen[ labels[ i ] ] ) {
                 continue;
             }
-            seen[ label ] = true;
-            order.push( label );
+            seen[ labels[ i ] ] = true;
+            order.push( labels[ i ] );
         }
 
-        // DOMPurify strips the `data-hbw-footnote` attribute but keeps the
-        // marker spans in place, so labels are matched by walking the source
-        // references and the rendered markers side by side in document order.
+        // Marker spans keep no attribute through sanitizing; they are
+        // recognised by class-name and paired with the prose reference list
+        // in document order.
         markers = [];
         ( function collect( node ) {
             var child;
@@ -701,14 +999,10 @@
             }
         }( pageNode ) );
 
-        FOOTNOTE_REF.lastIndex = 0;
+        // Pair each marker with the prose reference that produced it.
         i = 0;
-        while ( i < markers.length &&
-            ( marker = FOOTNOTE_REF.exec( pageSource ) ) !== null ) {
-            label = marker[ 1 ];
-            if ( !notes.hasOwnProperty( label ) ) {
-                continue;
-            }
+        while ( i < markers.length && i < labels.length ) {
+            label = labels[ i ];
             refLink = document.createElement( 'a' );
             refLink.setAttribute( 'href', '#hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             // No selector lookup: encoded labels can carry `.`, `(`, `)`
