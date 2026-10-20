@@ -94,7 +94,15 @@ function escapeHtml( value ) {
  *                              EditPage's #wikiPreview container (E1S4);
  *                              `{ resourceLog: [] }` records every resource
  *                              the document tries to fetch and aborts it
- *                              (E3S4: zero outbound requests).
+ *                              (E3S4: zero outbound requests);
+ *                              `{ wikiBase: string }` / `{ files: Object }`
+ *                              emit the E3.5S3 host attributes;
+ *                              `{ print: true }` marks the print route and
+ *                              counts `window.print()` calls;
+ *                              `{ clientWidth: number }` stubs the host width
+ *                              before the first fit (E3.5S4);
+ *                              `{ immediateTimers: true }` runs window timers
+ *                              synchronously (print, late refits).
  * @return {{dom: JSDOM, win: Window, errors: Array}} Test fixture.
  */
 function makePage( source, options ) {
@@ -113,7 +121,17 @@ function makePage( source, options ) {
         html = '<!doctype html><html><body><div id="content"><p>Main page</p></div></body></html>';
     } else {
         var escaped = escapeHtml( source );
-        var placeholder = '<div class="hbw-brew" id="hbw-brew">'
+        var hostAttrs = '';
+        if ( options.wikiBase !== undefined ) {
+            hostAttrs += ' data-hbw-wiki-base="' + escapeHtml( options.wikiBase ) + '"';
+        }
+        if ( options.files !== undefined ) {
+            hostAttrs += ' data-hbw-files="' + escapeHtml( JSON.stringify( options.files ) ) + '"';
+        }
+        if ( options.print ) {
+            hostAttrs += ' data-hbw-print="1"';
+        }
+        var placeholder = '<div class="hbw-brew" id="hbw-brew"' + hostAttrs + '>'
             + '<div class="hbw-source" id="hbw-source" style="display:none">' + escaped + '</div>'
             + '<noscript><pre class="hbw-brew-text">\n' + escaped + '</pre></noscript>'
             + '</div>';
@@ -124,6 +142,15 @@ function makePage( source, options ) {
                 + '<h2>Preview</h2><div class="previewnote">preview note</div>'
                 + placeholder
                 + '</div></div></body></html>';
+        } else if ( options.chrome ) {
+            // Monobook-style chrome around the content column: the print
+            // route must take these siblings out of layout (E3.5S4T3).
+            html = '<!doctype html><html><body><div id="globalWrapper">'
+                + '<div id="column-content"><div id="content">'
+                + placeholder
+                + '</div></div>'
+                + '<div id="footer">footer</div>'
+                + '</div></body></html>';
         } else {
             html = '<!doctype html><html><body><div id="content">'
                 + placeholder
@@ -157,6 +184,29 @@ function makePage( source, options ) {
         win.eval( purifySource );
     }
     win.eval( renderSource );
+
+    if ( options.clientWidth !== undefined ) {
+        var hostEl = win.document.getElementById( 'hbw-brew' );
+        if ( hostEl ) {
+            Object.defineProperty( hostEl, 'clientWidth', {
+                value: options.clientWidth,
+                configurable: true
+            } );
+        }
+    }
+    if ( options.print ) {
+        win.__printCount = 0;
+        win.print = function () {
+            win.__printCount++;
+        };
+    }
+    if ( options.immediateTimers ) {
+        win.setTimeout = function ( callback ) {
+            callback();
+            return 0;
+        };
+        win.clearTimeout = function () {};
+    }
 
     // The module listens for DOMContentLoaded when readyState is still
     // "loading"; dispatch synchronously so the assertions are deterministic.
@@ -812,11 +862,15 @@ function offOriginFetches( win, root ) {
     var selectors = extractSelectors( themeSource );
     var unscoped = [];
     var bare = /^\s*(html|body|\*|:root)\s*$/i;
+    // E3.5S4 print isolation is the one documented exception: it only runs in
+    // @media print on the print route and hides wiki chrome around the host.
+    var printOnly = /^\s*body\.hbw-print-mode\b/;
     var i;
     var leakedAtRule;
 
     for ( i = 0; i < selectors.length; i++ ) {
-        if ( selectors[ i ] && selectors[ i ].indexOf( '.hbw-brew' ) !== 0 ) {
+        if ( selectors[ i ] && selectors[ i ].indexOf( '.hbw-brew' ) !== 0 &&
+            !printOnly.test( selectors[ i ] ) ) {
             unscoped.push( selectors[ i ] );
         }
         if ( bare.test( selectors[ i ] ) ) {
@@ -837,57 +891,17 @@ function offOriginFetches( win, root ) {
     ok( selectors.length > 0, 'theme: stylesheet has rules' );
     ok( themeSource.indexOf( '.hbw-brew .hbw-frame' ) !== -1,
         'theme: parent stylesheet sizes the iframe host' );
-    ok( !/#hbw-/.test( themeSource ), 'theme: scoping uses the wrapper class, not ids' );
+    // Ids are allowed only inside the print-mode isolation rules (E3.5S4).
+    var idRules = themeSource.match( /[^{}]*#[^{}]*\{[^}]*\}/g ) || [];
+    ok( idRules.every( function ( rule ) {
+        return rule.indexOf( 'hbw-print-mode' ) !== -1;
+    } ), 'theme: ids appear only in print-mode isolation rules' );
 }() );
 
-// --- E3S2 T3: side-by-side structure matches the raw Homebrewery output ---
-( function () {
-    var source = '# Reference\n\n'
-        + '<div class="note">\n\nA **note** body.\n\n</div>\n\n'
-        + '| a | b |\n|---|---|\n| 1 | 2 |\n';
-    var page = makePage( source, { withHomebrewery: true } );
-    var rendered = renderRoot( page );
-    var column = rendered ? rendered.querySelector( '.page > .columnWrapper' ) : null;
-    var raw = page.win.HomebreweryRenderer.render( source, 0 );
-    var box = page.win.document.createElement( 'div' );
-
-    box.innerHTML = raw;
-
-    /**
-     * Flatten an element tree to `depth:tag.class>…` for comparison.
-     *
-     * @param {HTMLElement} node Root to walk.
-     * @return {string} Structure signature.
-     */
-    function structure( node ) {
-        var nodes = node.querySelectorAll( '*' );
-        var out = [];
-        var i;
-        var classes;
-        var depth;
-        var parent;
-        for ( i = 0; i < nodes.length; i++ ) {
-            classes = nodes[ i ].className
-                ? '.' + String( nodes[ i ].className ).split( /\s+/ ).join( '.' )
-                : '';
-            depth = 0;
-            parent = nodes[ i ].parentNode;
-            while ( parent && parent !== node ) {
-                depth++;
-                parent = parent.parentNode;
-            }
-            out.push( depth + ':' + nodes[ i ].nodeName.toLowerCase() + classes );
-        }
-        return out.join( '>' );
-    }
-
-    ok( !!column, 'side-by-side: our pane renders the reference brew' );
-    ok( !!column && structure( column ) === structure( box ),
-        'side-by-side: element structure matches Homebrewery' );
-    ok( !!column && column.textContent === box.textContent,
-        'side-by-side: text content matches Homebrewery' );
-    ok( page.errors.length === 0, 'side-by-side: no console errors' );
-}() );
+// --- E3B5 / E3.5S5: the old side-by-side harness is retired ---
+// Comparing the extension against the raw renderer under the same CSS proved
+// only that the renderer matches itself. Structural parity now lives in the
+// iframe assertions above and the real-app golden harness (tests/parity/).
 
 // --- E3S2 T4: theme parity extends to computed style values ---
 ( function () {
@@ -1383,9 +1397,309 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'data hygiene: no console errors' );
 }() );
 
+// --- E3.5S3 T1-T3: wiki links, categories, files become rendered output ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var files = {
+        'Name.png': {
+            url: 'http://wiki.example.test/images/Name.png',
+            exists: true
+        },
+        'Absent.png': { url: '', exists: false }
+    };
+    var source = '# Wiki\n\n'
+        + 'See [[Page]] and [[Page Two|Second Page]].\n\n'
+        + '[[Category:E35 Test]]\n\n'
+        + '[[File:Name.png|alt text|caption|200px]]\n\n'
+        + '[[File: Name.png |thumb|200px|The map]]\n\n'
+        + '[[File:Absent.png|missing alt]]\n\n'
+        + '```\n[[Code Page]]\n```\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base,
+        files: files
+    } );
+    var rendered = renderRoot( page );
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+    var label = rendered ? rendered.querySelector( 'a[href="' + base + 'Page_Two"]' ) : null;
+    var img = rendered ? rendered.querySelector( 'img[alt="alt text"]' ) : null;
+    var trimmed = rendered ? rendered.querySelector( 'img[alt="The map"]' ) : null;
+    var missing = rendered ? rendered.querySelector( '.hbw-missing-file' ) : null;
+    var text = rendered ? rendered.textContent : '';
+    var hrefs = [];
+    var i;
+
+    for ( i = 0; i < links.length; i++ ) {
+        hrefs.push( links[ i ].getAttribute( 'href' ) );
+    }
+
+    ok( hrefs.indexOf( base + 'Page' ) !== -1,
+        'wiki tokens: [[Page]] becomes a same-wiki link' );
+    ok( !!label && label.textContent === 'Second Page',
+        'wiki tokens: [[Page Two|label]] keeps its label' );
+    ok( hrefs.indexOf( base + 'Page_Two' ) !== -1,
+        'wiki tokens: spaces in the target become underscores' );
+    ok( text.indexOf( 'Category:' ) === -1 &&
+        hrefs.join( ' ' ).indexOf( 'E35_Test' ) === -1,
+        'wiki tokens: [[Category:...]] produces no content' );
+    ok( !!img && img.getAttribute( 'src' ) === files[ 'Name.png' ].url,
+        'wiki tokens: [[File:...]] uses the server file map URL' );
+    ok( !!img && img.getAttribute( 'alt' ) === 'alt text',
+        'wiki tokens: file alt argument wins' );
+    ok( !!img && /^width:\s*200px;\s*height:\s*auto$/.test(
+        img.getAttribute( 'style' )
+    ), 'wiki tokens: numeric file argument sizes the image' );
+    ok( !!trimmed && trimmed.getAttribute( 'src' ) === files[ 'Name.png' ].url,
+        'wiki tokens: file name is trimmed before the map lookup' );
+    ok( !!trimmed && trimmed.getAttribute( 'alt' ) === 'The map',
+        'wiki tokens: thumb/size options are not used as alt text' );
+    ok( !!missing && missing.getAttribute( 'title' ) === 'Missing file: Absent.png' &&
+        missing.textContent === '[File: Absent.png]',
+        'wiki tokens: missing file renders a visible placeholder' );
+    ok( text.indexOf( '[[Code Page]]' ) !== -1 &&
+        hrefs.indexOf( base + 'Code_Page' ) === -1,
+        'wiki tokens: fenced code stays literal' );
+    ok( page.errors.length === 0, 'wiki tokens: no console errors' );
+}() );
+
+// --- E3.5S3 T1: wiki tokens inside inline code stay literal ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = 'Inline `[[Page]]` stays literal.\n\n'
+        + 'Outside [[Page]] links.\n';
+    var page = makePage( source, { withHomebrewery: true, wikiBase: base } );
+    var rendered = renderRoot( page );
+    var code = rendered ? rendered.querySelector( 'code' ) : null;
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+
+    ok( !!code && code.textContent === '[[Page]]',
+        'wiki tokens: inline code stays literal' );
+    ok( links.length === 1,
+        'wiki tokens: only the prose token becomes a link' );
+    ok( page.errors.length === 0, 'wiki tokens: inline code has no console errors' );
+}() );
+
+// --- E3.5S3 T2: no wiki base leaves the token literal ---
+( function () {
+    var page = makePage( 'See [[Page]] and [[Page Two|label]] here.\n' );
+    var rendered = renderRoot( page );
+    var text = rendered ? rendered.textContent : '';
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+
+    ok( text.indexOf( '[[Page]]' ) !== -1 &&
+        text.indexOf( '[[Page Two|label]]' ) !== -1,
+        'wiki tokens: absent base leaves tokens literal' );
+    ok( links.length === 0,
+        'wiki tokens: absent base creates no anchors' );
+    ok( page.errors.length === 0, 'wiki tokens: absent base has no console errors' );
+}() );
+
+// --- E3.5S3 T2: every rendered anchor targets the top document ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Links\n\n'
+        + '[Example](http://wiki.example.test/wiki/Example)\n\n'
+        + '[[Other Page]]\n\n'
+        + '[Jump](#links)\n';
+    var page = makePage( source, { withHomebrewery: true, wikiBase: base } );
+    var rendered = renderRoot( page );
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+    var hardened = 0;
+    var inPage = 0;
+    var i;
+
+    for ( i = 0; i < links.length; i++ ) {
+        if ( links[ i ].getAttribute( 'rel' ) !== 'noopener noreferrer' ) {
+            continue;
+        }
+        if ( links[ i ].getAttribute( 'href' ).charAt( 0 ) === '#' ) {
+            if ( links[ i ].getAttribute( 'target' ) === '_self' ) {
+                inPage++;
+            }
+        } else if ( links[ i ].getAttribute( 'target' ) === '_top' ) {
+            hardened++;
+        }
+    }
+
+    ok( links.length === 3, 'anchors: markdown, wiki and in-page links render' );
+    ok( hardened === 2,
+        'anchors: document links get target=_top and rel=noopener noreferrer' );
+    ok( inPage === 1,
+        'anchors: in-page anchors stay in the frame (target=_self)' );
+    ok( page.errors.length === 0, 'anchors: no console errors' );
+}() );
+
+// --- E3.5S4 T1/T2: page stack fits the host pane ---
+( function () {
+    var source = '# Fit\n\nbody text\n';
+    var page = makePage( source );
+    var frame = frameOf( page );
+    var doc = frameDocOf( page );
+    var style = doc ? doc.getElementById( 'hbw-fit' ) : null;
+    var widthMatch = style ? /\.pages\s*\{[^}]*width:\s*([0-9.]+)px/.exec(
+        style.textContent
+    ) : null;
+    var scale = frame ? parseFloat( frame.getAttribute( 'data-hbw-scale' ) ) : NaN;
+    var height = frame ? parseFloat( frame.style.height ) : 0;
+
+    ok( !!style, 'fit: #hbw-fit rule exists inside the frame' );
+    ok( !!widthMatch && Math.abs( parseFloat( widthMatch[ 1 ] ) - 816 ) < 1,
+        'fit: .pages keeps the true letter width' );
+    ok( !!style && style.textContent.indexOf( 'transform:scale(' ) !== -1 &&
+        style.textContent.indexOf( 'transform-origin:top left' ) !== -1,
+        'fit: rule scales from the top-left corner' );
+    ok( !!frame && frame.getAttribute( 'data-hbw-scale' ) !== null,
+        'fit: frame reports data-hbw-scale' );
+    ok( !isNaN( scale ) && Math.abs( scale - 1 ) < 0.01,
+        'fit: wide host uses scale 1 (got ' + scale + ')' );
+    ok( height > 0, 'fit: frame height follows the page stack (got ' + height + ')' );
+    ok( page.errors.length === 0, 'fit: no console errors' );
+}() );
+
+// --- E3.5S4 T2: a narrow host scales the pane below 1 ---
+( function () {
+    var source = '# Narrow\n\nbody text\n';
+    var widePage = makePage( source );
+    var narrowPage = makePage( source, { clientWidth: 408 } );
+    var wideFrame = frameOf( widePage );
+    var narrowFrame = frameOf( narrowPage );
+    var wideScale = wideFrame ? parseFloat( wideFrame.getAttribute( 'data-hbw-scale' ) ) : NaN;
+    var narrowScale = narrowFrame ? parseFloat( narrowFrame.getAttribute( 'data-hbw-scale' ) ) : NaN;
+    var wideHeight = wideFrame ? parseFloat( wideFrame.style.height ) : 0;
+    var narrowHeight = narrowFrame ? parseFloat( narrowFrame.style.height ) : 0;
+
+    ok( !isNaN( narrowScale ) && Math.abs( narrowScale - 0.5 ) < 0.01,
+        'fit narrow: 408px host scales to ~0.5 (got ' + narrowScale + ')' );
+    ok( wideHeight > 0 && narrowHeight > 0,
+        'fit narrow: both frames have a positive height' );
+    ok( wideHeight > 0 && narrowHeight > 0 &&
+        Math.abs( ( narrowHeight / wideHeight ) - 0.5 ) < 0.05,
+        'fit narrow: frame height is roughly half the natural stack' );
+    ok( widePage.errors.length === 0 && narrowPage.errors.length === 0,
+        'fit narrow: no console errors' );
+}() );
+
+// --- E3.5S4 T3/T4: print route is unscaled and triggers window.print ---
+( function () {
+    var page = makePage( '# Print\n\nbody text\n', {
+        print: true,
+        immediateTimers: true,
+        chrome: true
+    } );
+    var frame = frameOf( page );
+    var doc = page.win.document;
+    var frameDoc = frameDocOf( page );
+    var style = frameDoc ? frameDoc.getElementById( 'hbw-fit' ) : null;
+    var scale = frame ? frame.getAttribute( 'data-hbw-scale' ) : null;
+    var width = frame ? parseFloat( frame.style.width ) : 0;
+    var footer = doc.getElementById( 'footer' );
+    var column = doc.getElementById( 'column-content' );
+    var wrapper = doc.getElementById( 'globalWrapper' );
+    var host = doc.getElementById( 'hbw-brew' );
+    var themeCss = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    ).replace( /\/\*[\s\S]*?\*\//g, '' );
+
+    ok( scale === '1', 'print: print route keeps scale 1' );
+    ok( !!style && style.textContent.indexOf( '.page{margin:0;}' ) !== -1,
+        'print: pages lose their screen margins' );
+    ok( /\bhbw-print-mode\b/.test( doc.body.className ),
+        'print: body carries hbw-print-mode' );
+    ok( !!footer && /\bhbw-print-hide\b/.test( footer.className ),
+        'print: chrome siblings are marked to leave the layout' );
+    ok( !!column && column.className.indexOf( 'hbw-print-hide' ) === -1 &&
+        !!wrapper && wrapper.className.indexOf( 'hbw-print-hide' ) === -1,
+        'print: host ancestors are never marked' );
+    ok( !!host && host.className.indexOf( 'hbw-print-hide' ) === -1,
+        'print: the brew host is never marked' );
+    ok( themeCss.indexOf( 'body.hbw-print-mode .hbw-print-hide' ) !== -1 &&
+        themeCss.indexOf( 'visibility' ) === -1,
+        'print: chrome is removed from layout, not merely hidden' );
+    ok( Math.round( width ) === 816,
+        'print: iframe is pinned to the letter width (got ' + width + ')' );
+    ok( page.win.__printCount === 1,
+        'print: window.print() runs once (got ' + page.win.__printCount + ')' );
+    ok( page.errors.length === 0, 'print: no console errors' );
+}() );
+
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );
+
+
+// --- E3.5S6: iframe security profile ---
+( function () {
+    var shell = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.shell.html' ), 'utf8'
+    );
+    var page;
+    var frame;
+    var doc;
+    var host;
+    var anchors;
+    var i;
+
+    ok( /Content-Security-Policy/.test( shell ) &&
+        /default-src 'none'/.test( shell ),
+        'security: shell CSP denies everything by default' );
+    ok( /img-src 'self' data:/.test( shell ),
+        'security: shell CSP allows same-origin images only' );
+    ok( /font-src 'self'/.test( shell ) && /style-src 'self'/.test( shell ),
+        'security: shell CSP scopes fonts/styles to the same origin' );
+    ok( !/<script/i.test( shell ),
+        'security: shell contains no script element' );
+
+    page = makePage( fs.readFileSync(
+        path.join( root, 'tests', 'fixtures', 'attack-brew.md' ), 'utf8'
+    ), { withHomebrewery: true } );
+    frame = frameOf( page );
+    doc = frameDocOf( page );
+    host = hostOf( page );
+
+    ok( !!frame && frame.getAttribute( 'sandbox' ) ===
+        'allow-same-origin allow-top-navigation-by-user-activation',
+        'security: iframe sandbox is same-origin + user-activated top nav' );
+    ok( !!frame && frame.getAttribute( 'sandbox' ).indexOf( 'allow-scripts' ) === -1,
+        'security: iframe sandbox never allows scripts' );
+    ok( !!frame && /camera 'none'/.test( frame.getAttribute( 'allow' ) || '' ),
+        'security: iframe permissions policy denies device features' );
+    ok( !!frame && frame.getAttribute( 'referrerpolicy' ) === 'no-referrer',
+        'security: iframe sends no referrer' );
+
+    ok( !!doc && !doc.querySelector( 'script, meta, base, form, iframe, object, embed' ),
+        'security: active elements are stripped inside the iframe' );
+    // The only style element is the parent's fit rule; the only link is the
+    // configured theme. Nothing else can be injected.
+    ok( !!doc && doc.querySelectorAll( 'style' ).length === 1 &&
+        doc.querySelector( 'style' ).id === 'hbw-fit',
+        'security: only the parent fit rule is present' );
+    ok( !!doc && doc.querySelectorAll( 'link[rel="stylesheet"]' ).length <= 1,
+        'security: at most the configured theme stylesheet is linked' );
+    ok( !!doc && !doc.querySelector( 'svg' ),
+        'security: inline SVG is stripped inside the iframe' );
+
+    // Author-supplied targets are overridden: the brew cannot choose where it
+    // navigates, and it cannot navigate the frame on its own.
+    anchors = doc ? doc.querySelectorAll( 'a' ) : [];
+    i = 0;
+    while ( i < anchors.length && anchors[ i ].getAttribute( 'target' ) === '_top' ) {
+        i++;
+    }
+    ok( anchors.length > 0 && i === anchors.length,
+        'security: every anchor is forced to target=_top (' + anchors.length + ')' );
+
+    // No user HTML in the parent: only the frame remains after render.
+    ok( !!host && !host.querySelector( '.page, .brewRenderer, img, script' ),
+        'security: parent host holds no rendered user HTML' );
+    ok( !!host && host.getAttribute( 'data-hbw-render' ) === 'html',
+        'security: render path is the iframe path' );
+
+    // External images stay blocked inside the frame.
+    ok( !!doc && !doc.querySelector( 'img[src^="http://evil"], img[src^="https://evil"]' ),
+        'security: external image sources are stripped in the iframe' );
+    ok( page.errors.length === 0,
+        'security: hostile brew raises no console errors' );
+}() );
 
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );

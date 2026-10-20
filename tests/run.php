@@ -363,6 +363,20 @@ if ( file_exists( $compiledThemePath ) ) {
     t_assert( strpos( $compiledTheme, 'columnWrapper' ) !== false,
         'E3.5S2 theme: upstream page/column rules compiled' );
 }
+// --- E3.5S6: static shell security contract ---
+$shellPath = $extDir . '/HomebreweryWiki.shell.html';
+t_assert( file_exists( $shellPath ), 'E3.5S6 shell: shell document present' );
+if ( file_exists( $shellPath ) ) {
+    $shellHtml = file_get_contents( $shellPath );
+    t_assert( strpos( $shellHtml, 'Content-Security-Policy' ) !== false &&
+        strpos( $shellHtml, "default-src 'none'" ) !== false,
+        'E3.5S6 shell: CSP denies by default' );
+    t_assert( stripos( $shellHtml, '<script' ) === false,
+        'E3.5S6 shell: no script element' );
+    t_assert( strpos( $shellHtml, 'columnSplit' ) === false,
+        'E3.5S6 shell: no page markup is hard-coded in the shell' );
+}
+
 if ( file_exists( $manifestPath ) ) {
     $manifestLines = file( $manifestPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
     t_assert( count( $manifestLines ) >= 125,
@@ -409,7 +423,10 @@ foreach ( $selectors as $selectorsText => $selectorsDepth ) {
 $selectors = $selectorsFound;
 $unscoped = array();
 foreach ( $selectors as $one ) {
-    if ( strpos( $one, '.hbw-brew' ) !== 0 ) {
+    // E3.5S4 print isolation is the documented exception: these rules run
+    // only on the print route and hide the wiki chrome around the brew host.
+    $printOnly = preg_match( '/^\s*body\.hbw-print-mode\b/', $one );
+    if ( strpos( $one, '.hbw-brew' ) !== 0 && !$printOnly ) {
         $unscoped[] = $one;
     }
 }
@@ -668,6 +685,155 @@ if ( $savedAnonRead === null ) {
     unset( $wgGroupPermissions['*']['read'] );
 } else {
     $wgGroupPermissions['*']['read'] = $savedAnonRead;
+}
+
+// --- E3.5S3: source-token extraction (categories, links, files) ---
+$catText = "[[Category:E35 Test]]\n"
+    . "[[Category:E35 Test|Sort key]]\n"
+    . "[[Category:Other Cat]]\n"
+    . "[[Category:]]\n";
+$cats = HomebreweryWiki::brewCategoryNames( $catText );
+t_assert( $cats === array( 'E35 Test', 'Other Cat' ),
+    'E3.5 categories: dedupe, handle |sort, ignore empty (' . implode( ', ', $cats ) . ')' );
+
+$linkText = "[[Main Page]]\n"
+    . "[[Main Page|home]]\n"
+    . "[[Category:E35 Test]]\n"
+    . "[[File:Name.png|alt]]\n"
+    . "[[Page Two]]\n";
+$linkTargets = HomebreweryWiki::brewLinkTargets( $linkText );
+t_assert( $linkTargets === array( 'Main Page', 'Page Two' ),
+    'E3.5 link targets: exclude Category/File, dedupe (' . implode( ', ', $linkTargets ) . ')' );
+
+$fileText = "[[File:HbwTestMissing.png|alt]]\n"
+    . "[[File:HbwTestMissing.png]]\n"
+    . "[[File:HbwTestOther.png]]\n";
+$fileMap = HomebreweryWiki::brewFileMap( $fileText );
+t_assert( count( $fileMap ) === 2 &&
+    isset( $fileMap['HbwTestMissing.png'] ) &&
+    isset( $fileMap['HbwTestOther.png'] ),
+    'E3.5 file map: one entry per referenced file' );
+t_assert( array_key_exists( 'exists', $fileMap['HbwTestMissing.png'] ) &&
+    $fileMap['HbwTestMissing.png']['exists'] === false,
+    'E3.5 file map: missing file reports exists=false' );
+t_assert( array_key_exists( 'url', $fileMap['HbwTestMissing.png'] ) &&
+    is_string( $fileMap['HbwTestMissing.png']['url'] ),
+    'E3.5 file map: each entry carries a url string' );
+
+// --- E3.5S3: code spans and fences never donate source tokens ---
+$codeText = "`[[Category:Hidden]]` stays literal\n"
+    . "\n"
+    . "```\n"
+    . "[[Category:Fenced]]\n"
+    . "[[Fenced Page]]\n"
+    . "[[File:Fenced.png]]\n"
+    . "```not-a-close\n"
+    . "[[Category:Still Fenced]]\n"
+    . "```\n"
+    . "\n"
+    . "[[Category:Visible]]\n"
+    . "[[Real Page]]\n"
+    . "[[File:Real.png]]\n";
+$codeCats = HomebreweryWiki::brewCategoryNames( $codeText );
+t_assert( $codeCats === array( 'Visible' ),
+    'E3.5 code filter: categories come from prose only (' . implode( ', ', $codeCats ) . ')' );
+$codeLinks = HomebreweryWiki::brewLinkTargets( $codeText );
+t_assert( $codeLinks === array( 'Real Page' ),
+    'E3.5 code filter: links come from prose only (' . implode( ', ', $codeLinks ) . ')' );
+$codeFiles = HomebreweryWiki::brewFileMap( $codeText );
+t_assert( count( $codeFiles ) === 1 && isset( $codeFiles['Real.png'] ),
+    'E3.5 code filter: files come from prose only' );
+
+$inlineProse = HomebreweryWiki::brewProseText( "keep `[[Page]]` tail\n" );
+t_assert( strpos( $inlineProse, '[[Page]]' ) === false &&
+    strpos( $inlineProse, 'keep' ) !== false,
+    'E3.5 code filter: inline code spans are removed' );
+
+$tildeProse = HomebreweryWiki::brewProseText(
+    "~~~\n[[Category:Tilde]]\n~~~\n[[Category:After]]\n"
+);
+t_assert( strpos( $tildeProse, 'Tilde' ) === false &&
+    strpos( $tildeProse, 'After' ) !== false,
+    'E3.5 code filter: tilde fences are removed' );
+
+$longFence = HomebreweryWiki::brewProseText(
+    "````\n[[Category:Four]]\n```\n[[Category:Three]]\n````\n[[Category:After]]\n"
+);
+t_assert( strpos( $longFence, 'Three' ) === false &&
+    strpos( $longFence, 'Four' ) === false &&
+    strpos( $longFence, 'After' ) !== false,
+    'E3.5 code filter: a shorter run does not close a longer fence' );
+
+// MediaWiki rejects some category names outright; the extractor must then
+// yield no key rather than invent one the parser would refuse.
+$badName = 'Bad[Name';
+$badTitle = Title::makeTitleSafe( NS_CATEGORY, $badName );
+if ( $badTitle === null ) {
+    t_assert( HomebreweryWiki::categoryDbKey( $badName ) === null,
+        'E3.5 categories: an invalid title yields no DB key' );
+} else {
+    t_assert( HomebreweryWiki::categoryDbKey( $badName ) === $badTitle->getDBkey(),
+        'E3.5 categories: valid titles keep their DB key' );
+}
+
+$phWiki = HomebreweryWiki::brewPlaceholder( "[[Main Page]]\n[[File:HbwTestMissing.png]]" );
+t_assert( strpos( $phWiki, 'data-hbw-wiki-base="' ) !== false,
+    'E3.5 placeholder: wiki base attribute emitted' );
+t_assert( strpos( $phWiki, 'data-hbw-files="' ) !== false,
+    'E3.5 placeholder: file map attribute emitted' );
+t_assert( strpos( $phWiki, 'HbwTestMissing.png' ) !== false,
+    'E3.5 placeholder: referenced file appears in the map' );
+
+// --- E3.5S3 integration: save updates categorylinks/pagelinks ---
+// Brew views skip the wikitext parser, so the save hook must register the
+// source tokens itself.  The page name is unique per run; no deletion is
+// needed and repeated runs cannot collide.
+$uniqueBrew = 'E35 Test ' . uniqid();
+$saveTitle = Title::newFromText( 'Manual:' . $uniqueBrew );
+t_assert( $saveTitle instanceof Title,
+    'E3.5 integration: unique brew title resolves' );
+
+if ( $saveTitle instanceof Title ) {
+    global $wgUser;
+    $savedUser = $wgUser;
+    $wgUser = $trusted;
+    $saveText = "[[Category:E35 Test]]\n\n[[Main Page]]\n\nBrew body\n";
+    $saveArticle = new Article( $saveTitle );
+    $saveStatus = $saveArticle->doEdit(
+        $saveText, 'E3.5S3 integration test', EDIT_NEW
+    );
+    $wgUser = $savedUser;
+    t_assert( $saveStatus->isOK(),
+        'E3.5 integration: brew page saved' );
+
+    $pageId = $saveTitle->getArticleID();
+    t_assert( $pageId > 0, 'E3.5 integration: saved page has an id' );
+
+    $db = wfGetDB( DB_MASTER );
+    // categorylinks stores the DB key (underscores), not the display name.
+    $catKey = 'E35_Test';
+    $catRow = $db->selectRow(
+        'categorylinks',
+        array( 'cl_to' ),
+        array( 'cl_from' => $pageId, 'cl_to' => $catKey ),
+        __METHOD__
+    );
+    t_assert( is_object( $catRow ) && $catRow->cl_to === $catKey,
+        'E3.5 integration: categorylinks row exists for the source category' );
+
+    $mainKey = Title::newFromText( 'Main Page' )->getDBKey();
+    $pageRow = $db->selectRow(
+        'pagelinks',
+        array( 'pl_title' ),
+        array(
+            'pl_from' => $pageId,
+            'pl_namespace' => 0,
+            'pl_title' => $mainKey
+        ),
+        __METHOD__
+    );
+    t_assert( is_object( $pageRow ) && $pageRow->pl_title === $mainKey,
+        'E3.5 integration: pagelinks row exists for the wiki link target' );
 }
 
 echo "\n$pass passed, $fail failed\n";

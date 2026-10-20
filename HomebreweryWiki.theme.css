@@ -44,4 +44,19 @@
         min-height: 0;
         border: 0;
     }
+
+    /* E3.5S4T3/T4: the print route (`printable=yes`) prints the sheet stack
+     * only. The render module tags every sibling off the host's ancestor
+     * path with `.hbw-print-hide`, and `display: none` takes that chrome out
+     * of layout entirely: `visibility: hidden` would keep its space and add
+     * blank sheets. The host is pinned to the top-left of the sheet. */
+    body.hbw-print-mode .hbw-print-hide {
+        display: none !important;
+    }
+    body.hbw-print-mode #hbw-brew {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
 }
