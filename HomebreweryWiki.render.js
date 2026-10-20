@@ -13,9 +13,9 @@
  *
  * Sanitization baseline (DESIGN.md D7 / SECURITY-REVIEW.md F1-F3):
  *   - remove <script>, <iframe>, <object>, <embed>, <form>, <style>,
- *     <audio>, <picture>, <source>, <video>, <track>, ...
+ *     <audio>, <picture>, <source>, <video>, <track>, <svg>, ...
  *   - remove event-handler attributes, unknown protocols (DOMPurify), and
- *     the poster/srcset attributes
+ *     the poster/srcset/background attributes
  *   - inline CSS is an allowlist: only safe properties with values that
  *     contain no resource-loading function (url(, image-set(), ...), no CSS
  *     escapes, and no position/overlay control
@@ -37,9 +37,12 @@
             'button', 'textarea', 'select', 'style', 'link', 'meta', 'base',
             // Media elements can fetch from author-controlled URLs through
             // src / srcset / poster; they are not needed for brew pages.
-            'audio', 'picture', 'source', 'video', 'track'
+            'audio', 'picture', 'source', 'video', 'track',
+            // SVG image/feImage (and the legacy background attribute) can
+            // fetch external URLs without going through the img check.
+            'svg'
         ],
-        FORBID_ATTR: [ 'srcdoc', 'formaction', 'poster', 'srcset' ],
+        FORBID_ATTR: [ 'srcdoc', 'formaction', 'poster', 'srcset', 'background' ],
         ALLOW_DATA_ATTR: false
     };
 

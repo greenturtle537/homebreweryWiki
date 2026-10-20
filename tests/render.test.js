@@ -182,6 +182,25 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'media: no console errors' );
 }() );
 
+// --- SVG and the legacy background attribute cannot fetch either ---
+( function () {
+    var source = '<svg><image href="https://evil.example/x.svg"></image>'
+        + '<feImage href="https://evil.example/y.svg"></feImage></svg>\n\n'
+        + '<table background="https://evil.example/bg.png"><tr><td>cell</td></tr></table>\n';
+    var page = makePage( source );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var table = rendered ? rendered.querySelector( 'table' ) : null;
+
+    ok( !!rendered, 'svg: content rendered' );
+    ok( !!rendered && !rendered.querySelector( 'svg' ), 'svg: svg element removed' );
+    ok( !!rendered && !/evil\.example/.test( rendered.innerHTML ),
+        'svg: external svg refs removed' );
+    ok( !!table, 'svg: table content kept' );
+    ok( !!table && !table.getAttribute( 'background' ),
+        'svg: legacy background attribute removed' );
+    ok( page.errors.length === 0, 'svg: no console errors' );
+}() );
+
 // --- D2/F3: only same-origin (or inline data) images survive ---
 ( function () {
     var page = makePage( '![evil](https://evil.example/x.png)\n\n'
