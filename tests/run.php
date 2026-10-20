@@ -453,5 +453,45 @@ t_assert( is_int( $wgMaxUploadSize ) && $wgMaxUploadSize > 0 &&
 t_assert( $wgEnableUploads === true,
     'E2S2 upload: local uploads enabled for the trusted editors' );
 
+// --- E2S3: brew pages inherit the global read policy (T1-T2) ---
+// No brew-specific read override: the extension never adds the brew
+// namespaces to $wgNamespaceProtection (1.14 would gate read with it) and
+// never changes the read right for the brew namespaces.  The regression check
+// below compares brew pages against normal pages under two policies.
+global $wgNamespaceProtection, $wgGroupPermissions;
+
+t_assert( !isset( $wgNamespaceProtection[NS_MANUAL] ) &&
+          !isset( $wgNamespaceProtection[NS_MANUAL_TALK] ),
+    'E2S3 read: no namespace protection (1.14 would gate read with it)' );
+
+$brewReadAnon  = $brewGateTitle->getUserPermissionsErrors( 'read', $anon );
+$mainReadAnon  = $mainGateTitle->getUserPermissionsErrors( 'read', $anon );
+$talkReadAnon  = $talkGateTitle->getUserPermissionsErrors( 'read', $anon );
+t_assert( count( $brewReadAnon ) === 0 && count( $talkReadAnon ) === 0 &&
+          count( $mainReadAnon ) === 0,
+    'E2S3 read: anonymous read allowed on brew, brew talk and normal pages' );
+
+$brewReadUser  = $brewGateTitle->getUserPermissionsErrors( 'read', $trusted );
+$mainReadUser  = $mainGateTitle->getUserPermissionsErrors( 'read', $trusted );
+t_assert( count( $brewReadUser ) === count( $mainReadUser ),
+    'E2S3 read: trusted read parity between brew and normal pages' );
+
+// Change the global read policy and confirm brew and normal pages move
+// together (no divergence) for anonymous visitors.
+$savedAnonRead = isset( $wgGroupPermissions['*']['read'] )
+    ? $wgGroupPermissions['*']['read'] : null;
+$wgGroupPermissions['*']['read'] = false;
+$anonymousUnderLockdown = new User();
+$brewReadLocked = $brewGateTitle->getUserPermissionsErrors( 'read', $anonymousUnderLockdown );
+$mainReadLocked = $mainGateTitle->getUserPermissionsErrors( 'read', $anonymousUnderLockdown );
+t_assert( count( $brewReadLocked ) === count( $mainReadLocked ) &&
+          count( $brewReadLocked ) > 0,
+    'E2S3 read: brew and normal pages change together with the global policy' );
+if ( $savedAnonRead === null ) {
+    unset( $wgGroupPermissions['*']['read'] );
+} else {
+    $wgGroupPermissions['*']['read'] = $savedAnonRead;
+}
+
 echo "\n$pass passed, $fail failed\n";
 exit( $fail > 0 ? 1 : 0 );
