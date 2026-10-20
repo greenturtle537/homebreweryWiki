@@ -49,3 +49,10 @@ cp "$DIR/node_modules/lodash/LICENSE" \
 	"$DIR/../../vendor/homebrewery-3.21.0/LICENSE.lodash"
 
 echo "built vendor/homebrewery-3.21.0/renderer.min.js"
+
+# Print the artifact hash so it can be compared with vendor/README.md.
+if command -v sha256sum >/dev/null 2>&1; then
+	sha256sum "$DIR/../../vendor/homebrewery-3.21.0/renderer.min.js"
+else
+	shasum -a 256 "$DIR/../../vendor/homebrewery-3.21.0/renderer.min.js"
+fi
