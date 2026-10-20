@@ -61,7 +61,9 @@ function escapeHtml( value ) {
  * renderer assets inside it.
  *
  * @param {string|null} source  Brew source, or null for a non-brew page.
- * @param {Object}      options `{ withLibs: false }` omits marked/DOMPurify.
+ * @param {Object}      options `{ withLibs: false }` omits marked/DOMPurify;
+ *                              `{ preview: true }` wraps the placeholder in
+ *                              EditPage's #wikiPreview container (E1S4).
  * @return {{dom: JSDOM, win: Window, errors: Array}} Test fixture.
  */
 function makePage( source, options ) {
@@ -80,11 +82,22 @@ function makePage( source, options ) {
         html = '<!doctype html><html><body><div id="content"><p>Main page</p></div></body></html>';
     } else {
         var escaped = escapeHtml( source );
-        html = '<!doctype html><html><body><div id="content">'
-            + '<div class="hbw-brew" id="hbw-brew">'
+        var placeholder = '<div class="hbw-brew" id="hbw-brew">'
             + '<div class="hbw-source" id="hbw-source" style="display:none">' + escaped + '</div>'
             + '<noscript><pre class="hbw-brew-text">\n' + escaped + '</pre></noscript>'
-            + '</div></div></body></html>';
+            + '</div>';
+        if ( options.preview ) {
+            // EditPage::displayPreviewArea() markup: the preview head sits
+            // above the shared placeholder inside #wikiPreview.
+            html = '<!doctype html><html><body><div id="content"><div id="wikiPreview" class="ontop">'
+                + '<h2>Preview</h2><div class="previewnote">preview note</div>'
+                + placeholder
+                + '</div></div></body></html>';
+        } else {
+            html = '<!doctype html><html><body><div id="content">'
+                + placeholder
+                + '</div></body></html>';
+        }
     }
 
     var dom = new JSDOM( html, {
@@ -246,6 +259,38 @@ function makePage( source, options ) {
     ok( doc.getElementById( 'hbw-source' ) === null, 'non-brew: source untouched/absent' );
     ok( doc.body.textContent.indexOf( 'Main page' ) !== -1, 'non-brew: content untouched' );
     ok( page.errors.length === 0, 'non-brew: no console errors' );
+}() );
+
+// --- E1S4 T1-T5: preview and saved view share one render path ---
+( function () {
+    var source = '# Brew Title\n\nA paragraph with **bold** text.\n';
+    var viewPage = makePage( source );
+    var previewPage = makePage( source, { preview: true } );
+    var viewRendered = viewPage.win.document.getElementById( 'hbw-brew-rendered' );
+    var previewRendered = previewPage.win.document.getElementById( 'hbw-brew-rendered' );
+    var previewArea = previewPage.win.document.getElementById( 'wikiPreview' );
+
+    ok( !!previewRendered, 'preview: rendered container created' );
+    ok( !!previewArea && !!previewRendered && previewArea.contains( previewRendered ),
+        'preview: rendered inside #wikiPreview' );
+    ok( !!previewRendered && !!previewRendered.parentNode &&
+        previewRendered.parentNode.id === 'hbw-brew',
+        'preview: same .hbw-brew wrapper as the saved view' );
+    ok( previewPage.win.document.getElementById( 'hbw-source' ) === null,
+        'preview: hidden source removed' );
+    ok( !!previewRendered && !!previewRendered.querySelector( 'h1' ),
+        'preview: markdown heading rendered' );
+    ok( !!previewRendered && previewRendered.getAttribute( 'data-hbw-render' ) === 'html',
+        'preview: html path is reported' );
+    ok( !!viewRendered && !!previewRendered &&
+        previewRendered.innerHTML === viewRendered.innerHTML,
+        'preview: rendered HTML is identical to the saved view' );
+    ok( !!viewRendered && !!previewRendered &&
+        previewRendered.className === viewRendered.className,
+        'preview: rendered classes are identical to the saved view' );
+    ok( !!previewArea && previewArea.querySelector( '.previewnote' ) !== null,
+        'preview: stock preview notice is preserved' );
+    ok( previewPage.errors.length === 0, 'preview: no console errors' );
 }() );
 
 // --- ES5 floor (Q19): module source stays ES5 ---

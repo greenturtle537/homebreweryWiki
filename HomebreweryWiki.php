@@ -18,7 +18,7 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 }
 
 /** Extension version, surfaced on Special:Version. */
-define( 'HOMEBREWERYWIKI_VERSION', '0.3.0' );
+define( 'HOMEBREWERYWIKI_VERSION', '0.4.0' );
 
 /**
  * Front-end renderer assets (E1S3), relative to $wgScriptPath, in load order.
@@ -116,11 +116,20 @@ $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
  *   action=raw return before this hook, so they stay untouched.
  *
  * - BeforePageDisplay, fired from OutputPage::output(), with ( &$out, &$sk ).
- *   Used to load the renderer bundle for brew page views only (legacy
- *   addScriptFile; 1.14 has no ResourceLoader).
+ *   Used to load the renderer bundle for brew page views and edit previews
+ *   (legacy addScriptFile; 1.14 has no ResourceLoader).
+ *
+ * Brew edit preview (E1S4).  The stock 1.14 preview runs markdown through the
+ * wikitext parser; OutputPageBeforeHTML swaps that parsed body for the same
+ * hidden-source placeholder the saved view emits, so preview and view share
+ * one render path (DESIGN D3).  EditPageBeforeEditButtons drops the AJAX
+ * live-preview handler on brew pages for the same reason.
  */
 $wgHooks['ArticleViewHeader'][] = 'HomebreweryWiki::onArticleViewHeader';
 $wgHooks['BeforePageDisplay'][] = 'HomebreweryWiki::onBeforePageDisplay';
+$wgHooks['OutputPageBeforeHTML'][] = 'HomebreweryWiki::onOutputPageBeforeHTML';
+$wgHooks['EditPage::showEditForm:initial'][] = 'HomebreweryWiki::onEditPageShowEditFormInitial';
+$wgHooks['EditPageBeforeEditButtons'][] = 'HomebreweryWiki::onEditPageBeforeEditButtons';
 
 /**
  * Run once MediaWiki is fully initialised (the 1.14 idiom).  The callback is

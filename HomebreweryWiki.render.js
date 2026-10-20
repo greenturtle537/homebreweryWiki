@@ -1,10 +1,12 @@
 /**
- * HomebreweryWiki render module (E1S3).
+ * HomebreweryWiki render module (E1S3, shared with the preview in E1S4).
  *
  * Replaces the E1S2 plain-text display with rendered, sanitized HTML.  The
- * server still emits the saved source into the hidden placeholder
- * (#hbw-source inside .hbw-brew) and loads the renderer scripts only on a brew
- * page view (see HomebreweryWiki.php / HomebreweryWiki.class.php).
+ * server still emits the source into the hidden placeholder (#hbw-source
+ * inside .hbw-brew) and loads the renderer scripts only on a brew page view or
+ * a brew edit preview (see HomebreweryWiki.php / HomebreweryWiki.class.php).
+ * Preview and saved view therefore run this exact module with the exact same
+ * markup contract (DESIGN D3).
  *
  * Load order (legacy addScriptFile, MW 1.14 has no ResourceLoader):
  *   1. vendor/marked-0.3.19.min.js   markdown -> HTML
