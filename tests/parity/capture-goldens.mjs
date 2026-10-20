@@ -36,7 +36,7 @@ async function setSource( page, source ) {
     const content = page.locator( '.cm-content' );
     await content.waitFor( { state: 'visible', timeout: 30000 } );
     await content.click();
-    await page.keyboard.press( 'Control+a' );
+    await page.keyboard.press( 'ControlOrMeta+a' );
     await page.keyboard.insertText( source );
     return 'CodeMirror 6 keyboard input';
 }

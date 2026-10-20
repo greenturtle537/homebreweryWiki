@@ -225,12 +225,12 @@ class HomebreweryWiki {
                 $output->addCategory( $key, '' );
             }
         }
-        // 1.14 images are registered as links too, so `[[File:...]]` shows up
-        // in the file's "what links here".
-        foreach ( self::brewFileMap( $text ) as $name => $info ) {
+        // Embedded files belong in imagelinks (file usage / Special:UnusedFiles),
+        // matching what the wikitext parser records for `[[File:...]]`.
+        foreach ( array_keys( self::brewFileMap( $text ) ) as $name ) {
             $fileTitle = Title::makeTitleSafe( NS_FILE, $name );
             if ( $fileTitle instanceof Title ) {
-                $output->addLink( $fileTitle );
+                $output->addImage( $fileTitle->getDBkey() );
             }
         }
 

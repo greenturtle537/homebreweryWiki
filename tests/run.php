@@ -797,7 +797,8 @@ if ( $saveTitle instanceof Title ) {
     global $wgUser;
     $savedUser = $wgUser;
     $wgUser = $trusted;
-    $saveText = "[[Category:E35 Test]]\n\n[[Main Page]]\n\nBrew body\n";
+    $saveText = "[[Category:E35 Test]]\n\n[[Main Page]]\n\n"
+        . "[[File:HbwTestMissing.png]]\n\nBrew body\n";
     $saveArticle = new Article( $saveTitle );
     $saveStatus = $saveArticle->doEdit(
         $saveText, 'E3.5S3 integration test', EDIT_NEW
@@ -834,6 +835,26 @@ if ( $saveTitle instanceof Title ) {
     );
     t_assert( is_object( $pageRow ) && $pageRow->pl_title === $mainKey,
         'E3.5 integration: pagelinks row exists for the wiki link target' );
+
+    // Embedded files are file usage (imagelinks), not page links: a pagelinks
+    // row would make Special:UnusedFiles / "what links here" lie.
+    $fileRow = $db->selectRow(
+        'imagelinks',
+        array( 'il_to' ),
+        array( 'il_from' => $pageId, 'il_to' => 'HbwTestMissing.png' ),
+        __METHOD__
+    );
+    t_assert( is_object( $fileRow ) && $fileRow->il_to === 'HbwTestMissing.png',
+        'E3.5 integration: imagelinks row exists for the embedded file' );
+
+    $filePageRow = $db->selectRow(
+        'pagelinks',
+        array( 'pl_title' ),
+        array( 'pl_from' => $pageId, 'pl_namespace' => NS_FILE ),
+        __METHOD__
+    );
+    t_assert( !is_object( $filePageRow ),
+        'E3.5 integration: embedded file is not registered as a page link' );
 }
 
 echo "\n$pass passed, $fail failed\n";
