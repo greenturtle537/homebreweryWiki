@@ -80,11 +80,27 @@ cp tests/run.php <mediawiki>/maintenance/hbwtest.php
 php maintenance/hbwtest.php
 ```
 
+Or run them against a real MediaWiki 1.14.1 without installing anything
+(Docker; PHP 5.6.40 standing in for the production 5.2.12/Suhosin stack):
+```sh
+npm run test:mw
+```
+
 DOM tests for the render module (Node + jsdom, no MediaWiki needed):
 ```sh
 npm install
 npm test
 ```
+
+Visual regression for the reference brew (headless Chromium; needs the browser
+once — `npx playwright install --with-deps chromium`):
+```sh
+npm run visual          # compare against tests/visual/baselines/
+npm run visual:update   # rewrite baselines deliberately, then review the PNG
+```
+
+CI (`.github/workflows/ci.yml`) runs all three: jsdom, MediaWiki 1.14.1 in a
+container, then the visual baseline check.
 
 There is no build step for the extension itself: the front-end assets
 (`HomebreweryWiki.render.js` plus `vendor/`) are plain static files served by

@@ -7,3 +7,6 @@ node_modules/
 
 # Homebrewery renderer build scratch (E3S2T1)
 build/renderer/upstream/
+
+# Visual regression diff artefacts (E3S5T2); baselines themselves are committed
+tests/visual/baselines/*.diff.png

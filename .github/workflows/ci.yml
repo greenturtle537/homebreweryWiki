@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  js:
+    name: DOM + theme tests (jsdom)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Install headless Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Visual regression (reference brew)
+        run: npm run visual
+
+  mw14:
+    name: Extension tests (MediaWiki 1.14.1 / PHP 5.6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build harness image
+        run: docker build -t hbw-mw14 tests/mw
+
+      - name: Run tests against a real MediaWiki 1.14.1 install
+        run: docker run --rm -v "$PWD:/opt/hbw:ro" hbw-mw14
