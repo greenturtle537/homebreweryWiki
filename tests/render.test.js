@@ -15,6 +15,29 @@ var fs = require( 'fs' );
 var path = require( 'path' );
 var JSDOM = require( 'jsdom' ).JSDOM;
 var VirtualConsole = require( 'jsdom' ).VirtualConsole;
+var requestInterceptor = require( 'jsdom' ).requestInterceptor;
+
+/**
+ * jsdom `resources` options that record every fetch attempt and answer it
+ * with an empty synthetic response, so a test never touches the network.
+ *
+ * jsdom only asks for fetch-capable resources (scripts, stylesheets, frames,
+ * media).  Recording them therefore turns "does the rendered brew make an
+ * outbound request?" into an observable list.
+ *
+ * @param {Array.<string>} log Collector for requested URLs.
+ * @return {Object} Value for the JSDOM `resources` option.
+ */
+function recordingResources( log ) {
+    return {
+        interceptors: [
+            requestInterceptor( function ( request ) {
+                log.push( String( request.url ) );
+                return new Response( '', { status: 204 } );
+            } )
+        ]
+    };
+}
 
 var root = path.join( __dirname, '..' );
 var homebrewerySource = fs.readFileSync(
@@ -68,7 +91,10 @@ function escapeHtml( value ) {
  *                              `{ withHomebrewery: true }` also loads the
  *                              pinned Homebrewery renderer bundle (E3S2T1);
  *                              `{ preview: true }` wraps the placeholder in
- *                              EditPage's #wikiPreview container (E1S4).
+ *                              EditPage's #wikiPreview container (E1S4);
+ *                              `{ resourceLog: [] }` records every resource
+ *                              the document tries to fetch and aborts it
+ *                              (E3S4: zero outbound requests).
  * @return {{dom: JSDOM, win: Window, errors: Array}} Test fixture.
  */
 function makePage( source, options ) {
@@ -108,7 +134,8 @@ function makePage( source, options ) {
     var dom = new JSDOM( html, {
         url: 'http://wiki.example.test/index.php?title=Manual:Test',
         runScripts: 'dangerously',
-        virtualConsole: virtualConsole
+        virtualConsole: virtualConsole,
+        resources: options.resourceLog ? recordingResources( options.resourceLog ) : undefined
     } );
     var win = dom.window;
 
@@ -251,6 +278,165 @@ function makePage( source, options ) {
         'images: inline data image kept' );
     ok( page.errors.length === 0, 'images: no console errors' );
 }() );
+
+// --- E3S4T1: every remaining injection vector is stripped ---
+( function () {
+    var source = '<style>@import url("https://evil.example/i.css");</style>\n\n'
+        + '<link rel="stylesheet" href="https://evil.example/s.css">\n\n'
+        + '<meta http-equiv="refresh" content="0;url=https://evil.example/r">\n\n'
+        + '<base href="https://evil.example/">\n\n'
+        + '<object data="https://evil.example/o"></object>\n\n'
+        + '<embed src="https://evil.example/e">\n\n'
+        + '<form action="https://evil.example/p"><input name="q"></form>\n\n'
+        + '<a href="javascript:window.__pwned=1" ping="https://evil.example/ping">js</a>\n\n'
+        + '<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">data</a>\n\n'
+        + '<img src="/images/ok.png" dynsrc="https://evil.example/d.png" '
+        + 'lowsrc="https://evil.example/l.png" alt="ok">\n\n'
+        + '<div style="background: u\\72l(https://evil.example/x.png); color: green">escaped</div>\n\n'
+        + '<div style="width: expression(alert(1)); color: purple">expression</div>\n';
+    var page = makePage( source );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var html = rendered ? rendered.innerHTML : '';
+    var divs = rendered ? rendered.querySelectorAll( 'div[style]' ) : [];
+    var escapedStyle = divs.length ? divs[0].getAttribute( 'style' ) : '';
+    var expressionStyle = divs.length > 1 ? divs[1].getAttribute( 'style' ) : '';
+    var img = rendered ? rendered.querySelector( 'img' ) : null;
+
+    ok( !!rendered, 'vectors: content rendered' );
+    ok( !!rendered && !rendered.querySelector( 'style' ), 'vectors: style element removed' );
+    ok( !!rendered && !rendered.querySelector( 'link' ), 'vectors: link element removed' );
+    ok( !!rendered && !rendered.querySelector( 'meta' ), 'vectors: meta refresh removed' );
+    ok( !!rendered && !rendered.querySelector( 'base' ), 'vectors: base element removed' );
+    ok( !!rendered && !rendered.querySelector( 'object' ), 'vectors: object removed' );
+    ok( !!rendered && !rendered.querySelector( 'embed' ), 'vectors: embed removed' );
+    ok( !!rendered && !rendered.querySelector( 'form' ),
+        'vectors: form removed' );
+    ok( html.toLowerCase().indexOf( 'javascript:' ) === -1,
+        'vectors: javascript: href removed' );
+    ok( html.toLowerCase().indexOf( 'data:text/html' ) === -1,
+        'vectors: data:text/html href removed' );
+    ok( html.indexOf( 'evil.example' ) === -1,
+        'vectors: no external URL survives' );
+    ok( escapedStyle.indexOf( 'color: green' ) !== -1,
+        'vectors: safe colour kept beside escaped url()' );
+    ok( escapedStyle.toLowerCase().indexOf( 'url' ) === -1,
+        'vectors: css-escaped url() removed' );
+    ok( expressionStyle.indexOf( 'color: purple' ) !== -1,
+        'vectors: safe colour kept beside expression()' );
+    ok( expressionStyle.toLowerCase().indexOf( 'expression' ) === -1,
+        'vectors: expression() removed' );
+    ok( !!img && img.getAttribute( 'src' ) === '/images/ok.png',
+        'vectors: same-origin img kept' );
+    ok( page.errors.length === 0, 'vectors: no console errors' );
+}() );
+
+/**
+ * Collect fetch-capable attribute values that resolve to another origin.
+ *
+ * Only attributes a browser fetches without user action are inspected
+ * (`href` is limited to elements that load, not anchors the reader clicks).
+ *
+ * @param {Window} win  jsdom window (for URL resolution).
+ * @param {Element} root Rendered container.
+ * @return {Array.<string>} Off-origin attribute descriptions.
+ */
+function offOriginFetches( win, root ) {
+    var fetchAttrs = {
+        'src': true, 'srcset': true, 'poster': true, 'background': true,
+        'data': true, 'ping': true, 'formaction': true, 'action': true,
+        'href': true
+    };
+    var hrefLoaders = { 'link': true, 'use': true, 'image': true, 'base': true };
+    var found = [];
+    var nodes = root.querySelectorAll( '*' );
+    var i;
+    var j;
+    var attr;
+    var tag;
+    var parts;
+    var a;
+
+    for ( i = 0; i < nodes.length; i++ ) {
+        tag = nodes[ i ].nodeName.toLowerCase();
+        for ( attr in fetchAttrs ) {
+            if ( !fetchAttrs.hasOwnProperty( attr ) || !nodes[ i ].hasAttribute( attr ) ) {
+                continue;
+            }
+            if ( attr === 'href' && !hrefLoaders[ tag ] ) {
+                continue;
+            }
+            parts = String( nodes[ i ].getAttribute( attr ) ).split( /\s+/ );
+            for ( j = 0; j < parts.length; j++ ) {
+                a = win.document.createElement( 'a' );
+                a.href = parts[ j ];
+                if ( !a.protocol || !a.host ) {
+                    continue;
+                }
+                if ( a.protocol + '//' + a.host !==
+                    win.location.protocol + '//' + win.location.host ) {
+                    found.push( tag + '[' + attr + ']=' + parts[ j ] );
+                }
+            }
+        }
+    }
+    return found;
+}
+
+// --- E3S4 story: the attack brew runs no scripts, makes no outbound request ---
+( function () {
+    var attackSource = fs.readFileSync(
+        path.join( __dirname, 'fixtures', 'attack-brew.md' ), 'utf8'
+    );
+    var requests = [];
+    var page = makePage( attackSource, {
+        withHomebrewery: true,
+        resourceLog: requests
+    } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var offOrigin = rendered ? offOriginFetches( page.win, rendered ) : [ 'no render' ];
+
+    ok( !!rendered, 'attack brew: content rendered' );
+    ok( page.win.__hbw_pwned === undefined, 'attack brew: no script executed' );
+    ok( !!rendered && !rendered.querySelector( 'script' ), 'attack brew: no script element' );
+    ok( !!rendered && !rendered.querySelector( 'iframe' ), 'attack brew: no frame' );
+    ok( requests.length === 0,
+        'attack brew: no outbound request (' + requests.join( ', ' ) + ')' );
+    ok( offOrigin.length === 0,
+        'attack brew: no fetch-capable off-origin attribute (' + offOrigin.join( ', ' ) + ')' );
+    ok( !!rendered && rendered.querySelectorAll( '.hbw-page' ).length >= 3,
+        'attack brew: all pages still render' );
+    ok( !!rendered && !!rendered.querySelector( 'h1' ) &&
+        rendered.querySelector( 'h1' ).textContent === 'Attack Brew',
+        'attack brew: benign prose survives (sanitizer, not escaper)' );
+    ok( !!rendered && rendered.querySelectorAll( 'img[src="/images/ok.png"]' ).length >= 2,
+        'attack brew: same-origin images survive' );
+    ok( !!rendered && !!rendered.querySelector( 'img[src^="data:image/"]' ),
+        'attack brew: inline data image survives' );
+    ok( page.errors.length === 0, 'attack brew: no console errors' );
+}() );
+
+// --- E3S4 story: the reference demo brew is equally inert ---
+( function () {
+    var demos = [ 'three-page-brew.md', 'attack-brew.md' ];
+    var d;
+    var source;
+    var requests;
+    var page;
+    var rendered;
+    var offOrigin;
+
+    for ( d = 0; d < demos.length; d++ ) {
+        source = fs.readFileSync( path.join( __dirname, 'fixtures', demos[ d ] ), 'utf8' );
+        requests = [];
+        page = makePage( source, { withHomebrewery: true, resourceLog: requests } );
+        rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+        offOrigin = rendered ? offOriginFetches( page.win, rendered ) : [ 'no render' ];
+
+        ok( requests.length === 0 && offOrigin.length === 0,
+            'demo brew ' + demos[ d ] + ': inert (no request, no off-origin attribute)' );
+    }
+}() );
+
 
 // --- Degraded path: renderer unavailable => plain text, never hidden ---
 ( function () {

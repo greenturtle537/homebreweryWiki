@@ -98,10 +98,16 @@
             // fetch external URLs without going through the img check.
             'svg'
         ],
-        FORBID_ATTR: [ 'srcdoc', 'formaction', 'poster', 'srcset', 'background' ],
+        // `ping` fires an outbound request on click, and `dynsrc` / `lowsrc`
+        // are legacy media pointers that still load in some engines.
+        FORBID_ATTR: [
+            'srcdoc', 'formaction', 'poster', 'srcset', 'background',
+            'ping', 'dynsrc', 'lowsrc'
+        ],
         // Author data-* attributes carry no value for readers and are
-        // stripped.  Footnote markers are recognised by their CSS class-name instead,
-        // so no generated attribute has to survive sanitizing (E3S3T3).
+        // stripped.  Footnote markers are recognised by their CSS class-name
+        // instead, so no generated attribute has to survive sanitizing
+        // (E3S3T3).
         ALLOW_DATA_ATTR: false
     };
 
