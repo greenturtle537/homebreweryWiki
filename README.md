@@ -11,8 +11,15 @@ Source is PHP 5.2 compatible: no namespaces, closures, short array syntax,
 `__DIR__`, or late static binding. MediaWiki 1.14 has no `extension.json`,
 `ContentHandler`, or `ResourceLoader`.
 
-Front-end JavaScript targets **ES5** (desktop only): no `let`/`const`, arrow
-functions, template literals, classes, or ES modules.
+Front-end JavaScript written in this extension targets **ES5** (desktop only):
+no `let`/`const`, arrow functions, template literals, classes, or ES modules.
+
+The one exception is the vendored Homebrewery renderer bundle
+(`vendor/homebrewery-3.21.0/renderer.min.js`), which is built from upstream
+v3.21.0 as an ES2017 IIFE because upstream's marked 15 / lodash cannot be
+lowered to ES5. It follows Homebrewery v3.21's own browser floor; browsers that
+cannot parse it fall back to the vendored `marked` bundle, and a browser with
+no renderer at all still gets the plain-text `<pre>` view.
 
 ## Install
 

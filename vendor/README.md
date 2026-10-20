@@ -37,3 +37,4 @@ review), and keep the order above.
 - https://cdn.jsdelivr.net/npm/dompurify@2.5.8/dist/purify.min.js
 - https://raw.githubusercontent.com/markedjs/marked/v0.3.19/LICENSE.md
 - https://raw.githubusercontent.com/cure53/DOMPurify/2.5.8/LICENSE
+{"File":"`homebrewery-3.21.0/renderer.min.js`","Upstream":"https://github.com/naturalcrit/homebrewery (tag v3.21.0, `shared/markdown.js`)","Version":"3.21.0","License":"MIT (`homebrewery-3.21.0/LICENSE`)","SHA-256":"`ece48aae0a8a6e46d49a1ab00736ec5b712da3e1d0cdc9b517c10a5d7d5ea3f2`","Notes":"IIFE bundle exposing `window.HomebreweryRenderer`. Rebuild with build/renderer/build.sh."}

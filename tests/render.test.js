@@ -17,6 +17,9 @@ var JSDOM = require( 'jsdom' ).JSDOM;
 var VirtualConsole = require( 'jsdom' ).VirtualConsole;
 
 var root = path.join( __dirname, '..' );
+var homebrewerySource = fs.readFileSync(
+    path.join( root, 'vendor', 'homebrewery-3.21.0', 'renderer.min.js' ), 'utf8'
+);
 var markedSource = fs.readFileSync( path.join( root, 'vendor', 'marked-0.3.19.min.js' ), 'utf8' );
 var purifySource = fs.readFileSync( path.join( root, 'vendor', 'dompurify-2.5.8.min.js' ), 'utf8' );
 var renderSource = fs.readFileSync( path.join( root, 'HomebreweryWiki.render.js' ), 'utf8' );
@@ -62,6 +65,8 @@ function escapeHtml( value ) {
  *
  * @param {string|null} source  Brew source, or null for a non-brew page.
  * @param {Object}      options `{ withLibs: false }` omits marked/DOMPurify;
+ *                              `{ withHomebrewery: true }` also loads the
+ *                              pinned Homebrewery renderer bundle (E3S2T1);
  *                              `{ preview: true }` wraps the placeholder in
  *                              EditPage's #wikiPreview container (E1S4).
  * @return {{dom: JSDOM, win: Window, errors: Array}} Test fixture.
@@ -107,6 +112,14 @@ function makePage( source, options ) {
     } );
     var win = dom.window;
 
+    if ( options.withHomebrewery ) {
+        // The bundle runs on the real browser floor; jsdom's window still has
+        // no structuredClone, which upstream's marked hooks use.
+        win.structuredClone = win.structuredClone || function ( value ) {
+            return JSON.parse( JSON.stringify( value ) );
+        };
+        win.eval( homebrewerySource );
+    }
     if ( options.withLibs !== false ) {
         win.eval( markedSource );
         win.eval( purifySource );
@@ -364,6 +377,77 @@ function makePage( source, options ) {
     ok( pages.length === 3 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
         'reference brew: \\column is preserved inside its page' );
     ok( page.errors.length === 0, 'reference brew: no console errors' );
+}() );
+
+// --- E3S2 T1: the pinned Homebrewery renderer produces the output ---
+( function () {
+    var source = '# Brew Title\n\nA paragraph with **bold** text.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var heading = rendered ? rendered.querySelector( 'h1' ) : null;
+
+    ok( typeof page.win.HomebreweryRenderer === 'object',
+        'pinned: bundle defines HomebreweryRenderer' );
+    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
+        'pinned: container reports the pinned renderer' );
+    ok( !!rendered && !!heading, 'pinned: markdown heading rendered' );
+    ok( !!heading && heading.textContent === 'Brew Title', 'pinned: heading text preserved' );
+    ok( !!heading && !!heading.getAttribute( 'id' ),
+        'pinned: Homebrewery heading ids are emitted (not the marked fallback)' );
+    ok( !!rendered && !!rendered.querySelector( 'p strong' ),
+        'pinned: inline markdown becomes markup' );
+    ok( page.errors.length === 0, 'pinned: no console errors' );
+}() );
+
+// --- E3S2 T2: pinned-renderer output is still sanitized before insertion ---
+( function () {
+    var source = '<script>window.__pwnedPin = true;<\/script>\n\n'
+        + '# Safe\n\n'
+        + '<img src="x" onerror="window.__pwnedPin = \'img\';">\n\n'
+        + '<iframe src="https://evil.example/"></iframe>\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+
+    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
+        'pinned sanitize: pinned renderer is in use' );
+    ok( !!rendered && !rendered.querySelector( 'script' ),
+        'pinned sanitize: script removed' );
+    ok( !!rendered && !rendered.querySelector( 'iframe' ),
+        'pinned sanitize: iframe removed' );
+    ok( !!rendered && !/onerror/i.test( rendered.innerHTML ),
+        'pinned sanitize: event handler removed' );
+    ok( page.win.__pwnedPin === undefined, 'pinned sanitize: no script executed' );
+    ok( !!rendered && !!rendered.querySelector( 'h1' ),
+        'pinned sanitize: safe content kept' );
+    ok( page.errors.length === 0, 'pinned sanitize: no console errors' );
+}() );
+
+// --- E3S2 T1: marker aliases match upstream's PAGEBREAK_REGEX_V3 ---
+( function () {
+    var source = 'One\n\n\\pagebreak\n\nTwo\n\n\\columnbreak\n\nThree\n\n'
+        + '\\page {landscape}\n\nFour\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( pages.length === 3, 'aliases: \\pagebreak and \\page both split pages' );
+    ok( pages.length === 3 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
+        'aliases: \\columnbreak starts a new column' );
+    ok( text.indexOf( 'pagebreak' ) === -1 && text.indexOf( 'columnbreak' ) === -1 &&
+        text.indexOf( 'landscape' ) === -1,
+        'aliases: marker text and attributes do not leak' );
+    ok( page.errors.length === 0, 'aliases: no console errors' );
+}() );
+
+// --- Degraded path still reports the fallback renderer when the bundle is absent ---
+( function () {
+    var page = makePage( '# Title\n\nbody\n' );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+
+    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
+        'fallback renderer: marked path is reported' );
+    ok( page.errors.length === 0, 'fallback renderer: no console errors' );
 }() );
 
 // --- ES5 floor (Q19): module source stays ES5 ---

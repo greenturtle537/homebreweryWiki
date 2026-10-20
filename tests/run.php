@@ -299,13 +299,15 @@ $wgArticle = $savedArticle;
 // --- E1S3: renderer asset list & load order (T1) ---
 // markdown parser first, sanitizer second, render module last.
 $assets = HomebreweryWiki::rendererAssets();
-t_assert( count( $assets ) === 3, 'E1S3 assets: three scripts' );
-t_assert( $assets[0] === HOMEBREWERYWIKI_MARKED_LIB,
-    'E1S3 assets: marked loads first' );
-t_assert( $assets[1] === HOMEBREWERYWIKI_PURIFY_LIB,
-    'E1S3 assets: DOMPurify loads second' );
-t_assert( $assets[2] === HOMEBREWERYWIKI_RENDER_MODULE,
-    'E1S3 assets: render module loads last' );
+t_assert( count( $assets ) === 4, 'E3S2 assets: four scripts' );
+t_assert( $assets[0] === HOMEBREWERYWIKI_HOMEBREWERY_LIB,
+    'E3S2 assets: pinned Homebrewery renderer loads first' );
+t_assert( $assets[1] === HOMEBREWERYWIKI_MARKED_LIB,
+    'E3S2 assets: marked fallback loads second' );
+t_assert( $assets[2] === HOMEBREWERYWIKI_PURIFY_LIB,
+    'E3S2 assets: DOMPurify loads third' );
+t_assert( $assets[3] === HOMEBREWERYWIKI_RENDER_MODULE,
+    'E3S2 assets: render module loads last' );
 
 // Running from the extension dir (repo layout) or from MW maintenance/
 // (copied to hbwtest.php): resolve the extension directory either way.
@@ -313,9 +315,14 @@ $extDir = dirname( dirname( __FILE__ ) );
 if ( !file_exists( $extDir . '/HomebreweryWiki.php' ) ) {
     $extDir .= '/extensions/HomebreweryWiki';
 }
+$relHomebrewery = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_HOMEBREWERY_LIB );
 $relMarked   = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_MARKED_LIB );
 $relPurify   = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_PURIFY_LIB );
 $relRenderer = str_replace( '/extensions/HomebreweryWiki/', '', HOMEBREWERYWIKI_RENDER_MODULE );
+t_assert( file_exists( $extDir . '/' . $relHomebrewery ),
+    'E3S2 assets: pinned Homebrewery renderer present' );
+t_assert( strpos( HOMEBREWERYWIKI_HOMEBREWERY_LIB, '3.21.0' ) !== false,
+    'E3S2 assets: Homebrewery renderer version pinned' );
 t_assert( file_exists( $extDir . '/' . $relMarked ),
     'E1S3 assets: marked bundle present' );
 t_assert( file_exists( $extDir . '/' . $relPurify ),

@@ -34,6 +34,7 @@ define( 'HOMEBREWERYWIKI_VERSION', '0.6.0' );
  * the pinned Homebrewery renderer bundle; E7 (build, release & upgrades)
  * owns the reproducible build.
  */
+define( 'HOMEBREWERYWIKI_HOMEBREWERY_LIB', '/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/renderer.min.js' );
 define( 'HOMEBREWERYWIKI_MARKED_LIB', '/extensions/HomebreweryWiki/vendor/marked-0.3.19.min.js' );
 define( 'HOMEBREWERYWIKI_PURIFY_LIB', '/extensions/HomebreweryWiki/vendor/dompurify-2.5.8.min.js' );
 define( 'HOMEBREWERYWIKI_RENDER_MODULE', '/extensions/HomebreweryWiki/HomebreweryWiki.render.js' );
