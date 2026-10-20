@@ -815,12 +815,17 @@ if ( $saveTitle instanceof Title ) {
     $catKey = 'E35_Test';
     $catRow = $db->selectRow(
         'categorylinks',
-        array( 'cl_to' ),
+        array( 'cl_to', 'cl_sortkey' ),
         array( 'cl_from' => $pageId, 'cl_to' => $catKey ),
         __METHOD__
     );
     t_assert( is_object( $catRow ) && $catRow->cl_to === $catKey,
         'E3.5 integration: categorylinks row exists for the source category' );
+    // Empty sort keys sort every brew first under a blank heading; the
+    // wikitext parser's default is the page's prefixed title.
+    t_assert( is_object( $catRow ) &&
+        $catRow->cl_sortkey === $saveTitle->getPrefixedText(),
+        'E3.5 integration: category sort key defaults to the page title' );
 
     $mainKey = Title::newFromText( 'Main Page' )->getDBKey();
     $pageRow = $db->selectRow(

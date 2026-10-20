@@ -1091,9 +1091,11 @@
      * @param {number} pageIndex zero-based page index; note and reference
      *                          ids are scoped to the page so identical labels
      *                          on different pages stay document-unique
+     * @param {Object} wikiConfig `{ base: string, files: Object }` used to
+     *                            expand wiki tokens in note bodies
      * @return {void}
      */
-    function linkFootnotes( pageSource, pageNode, notes, pageIndex ) {
+    function linkFootnotes( pageSource, pageNode, notes, pageIndex, wikiConfig ) {
         var doc = pageNode.ownerDocument || document;
         var pageNumber = pageIndex + 1;
         var order = [];
@@ -1186,7 +1188,11 @@
             itemNode = doc.createElement( 'li' );
             itemNode.setAttribute( 'id', 'hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             itemNode.className = FOOTNOTE_ITEM_CLASS;
-            itemNode.innerHTML = renderMarkdown( notes[ label ], 0 ) || '';
+            // Note bodies are prose too: expand wiki tokens before rendering
+            // so the footnote agrees with the link tables the save hook wrote.
+            itemNode.innerHTML = renderMarkdown(
+                applyWikiTokens( notes[ label ], wikiConfig ), 0
+            ) || '';
             backLink = doc.createElement( 'a' );
             backLink.setAttribute( 'href', '#hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             backLink.className = FOOTNOTE_BACK_CLASS;
@@ -1212,9 +1218,10 @@
      * @param {Array.<string>} renderedPages sanitized page HTML
      * @param {Array.<string>} pageSources page sources (footnote order)
      * @param {Object.<string,string>} notes footnote bodies by label
+     * @param {Object} wikiConfig `{ base: string, files: Object }` for tokens
      * @return {HTMLElement} the `.pages` element
      */
-    function buildPagesInto( doc, renderedPages, pageSources, notes ) {
+    function buildPagesInto( doc, renderedPages, pageSources, notes, wikiConfig ) {
         var body = doc.body;
         var rendererNode = doc.querySelector( '.' + BREW_RENDERER_CLASS );
         var pagesNode = rendererNode
@@ -1253,7 +1260,7 @@
             wrapper.innerHTML = renderedPages[ p ];
             pageNode.appendChild( wrapper );
 
-            linkFootnotes( pageSources[ p ], pageNode, notes, p );
+            linkFootnotes( pageSources[ p ], pageNode, notes, p, wikiConfig );
 
             // Upstream page number: `.pageNumber.auto` uses the theme's CSS
             // counter, so no number is hard-coded here (E3.5S4 / E3S3T2).
@@ -1585,7 +1592,8 @@
 
             injectTheme( doc, theme );
             pagesNode = buildPagesInto(
-                doc, renderedPages, footnoteData.pages, footnoteData.notes
+                doc, renderedPages, footnoteData.pages, footnoteData.notes,
+                wikiConfig
             );
             watchFrame( frame, pagesNode, host );
 

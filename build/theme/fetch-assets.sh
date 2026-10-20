@@ -33,9 +33,11 @@ tar -xzf "$TARBALL" -C "$TMP" "homebrewery-${PIN#v}/themes"
 cd "$TMP/homebrewery-${PIN#v}"
 while read -r hash path; do
 	[ -n "$path" ] || continue
+	# Verify first: set -e must stop the copy, never leave an unverified file
+	# behind in the served directory.
+	printf '%s  %s\n' "$hash" "$path" | sha256sum -c - >/dev/null
 	mkdir -p "$OUT/$(dirname "$path")"
 	cp "$path" "$OUT/$path"
-	printf '%s  %s\n' "$hash" "$path" | sha256sum -c - >/dev/null
 done < "$MANIFEST"
 
 rm -rf "$TMP"

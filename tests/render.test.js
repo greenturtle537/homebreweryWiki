@@ -1132,6 +1132,40 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'footnotes: no console errors' );
 }() );
 
+// --- E3.5S3 T1: wiki tokens expand inside footnote bodies too ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = 'A claim with a footnote.[^1]\n\n'
+        + '[^1]: See [[Other Page]], [[Category:Hidden]] and '
+        + '[[File:Name.png|alt]].\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base,
+        files: {
+            'Name.png': {
+                url: 'http://wiki.example.test/images/Name.png',
+                exists: true
+            }
+        }
+    } );
+    var rendered = renderRoot( page );
+    var notes = rendered
+        ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' )
+        : [];
+    var link = notes.length ? notes[ 0 ].querySelector( 'a[href]' ) : null;
+    var img = notes.length ? notes[ 0 ].querySelector( 'img' ) : null;
+
+    ok( notes.length === 1, 'footnote wiki tokens: note emitted' );
+    ok( !!link && link.getAttribute( 'href' ) === base + 'Other_Page',
+        'footnote wiki tokens: page link expands inside the note' );
+    ok( !!img && img.getAttribute( 'src' ) ===
+        'http://wiki.example.test/images/Name.png',
+        'footnote wiki tokens: file renders as an image inside the note' );
+    ok( notes.length === 1 && notes[ 0 ].textContent.indexOf( '[[' ) === -1,
+        'footnote wiki tokens: no literal brackets survive (category suppressed)' );
+    ok( page.errors.length === 0, 'footnote wiki tokens: no console errors' );
+}() );
+
 // --- E3S3 T3: footnote definitions resolve across pages ---
 ( function () {
     var source = 'First page refs one.[^a]\n\n'

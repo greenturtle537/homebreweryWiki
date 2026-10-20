@@ -45,7 +45,7 @@ define( 'HOMEBREWERYWIKI_THEME_CSS', '/extensions/HomebreweryWiki/HomebreweryWik
  * vendored build artifact; set it in LocalSettings.php to an admin-supplied
  * theme directory when the bundled assets are not licence-cleared.  The URL
  * must be same-origin: the shell CSP allows only 'self' styles and fonts, so
- * an off-origin URL is blocked silently and the brew renders untitled.
+ * an off-origin URL is blocked silently and the brew renders unthemed.
  */
 $wgHomebreweryWikiThemeCss = null;
 

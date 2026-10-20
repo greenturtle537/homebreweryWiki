@@ -219,10 +219,13 @@ class HomebreweryWiki {
                 $output->addLink( $title );
             }
         }
+        // The wikitext parser's default sort key is the page's prefixed
+        // title; an empty key would sort every brew under a blank heading.
+        $sortKey = $article->getTitle()->getPrefixedText();
         foreach ( self::brewCategoryNames( $text ) as $category ) {
             $key = self::categoryDbKey( $category );
             if ( $key !== null && $key !== '' ) {
-                $output->addCategory( $key, '' );
+                $output->addCategory( $key, $sortKey );
             }
         }
         // Embedded files belong in imagelinks (file usage / Special:UnusedFiles),
@@ -675,7 +678,9 @@ class HomebreweryWiki {
             $out->addScriptFile( $wgScriptPath . $asset );
         }
         foreach ( self::rendererStyles() as $style ) {
-            $out->addStyle( $wgScriptPath . $style, 'screen' );
+            // 'all', not 'screen': the host print rules live in this file and
+            // only apply to the parent document when print media is loaded.
+            $out->addStyle( $wgScriptPath . $style, 'all' );
         }
         return true;
     }

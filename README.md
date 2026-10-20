@@ -108,8 +108,9 @@ v3.21.0, compiles `themes/V3/Blank/style.less` then
 `../../../fonts` URLs to be **relative to `theme.css`** (`./themes/...`). That
 keeps the committed stylesheet working under any `$wgScriptPath`, including a
 subdirectory install such as `/wiki`. `HBW_ASSET_BASE` overrides the prefix
-when the assets are served from another origin or directory; rebuild after
-changing it. To use an admin-supplied theme directory instead, set
+when the assets are served from another directory on the same origin (the shell
+CSP only allows same-origin fonts, images and styles); rebuild after changing
+it. To use an admin-supplied theme directory instead, set
 `$wgHomebreweryWikiThemeCss` in `LocalSettings.php`. Never hotlink Homebrewery.
 
 Visual regression for the reference brew (headless Chromium; needs the browser
