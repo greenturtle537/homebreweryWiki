@@ -438,11 +438,12 @@ t_assert( $trusted->isAllowed( 'upload' ) === true,
 t_assert( in_array( 'png', $wgFileExtensions ) &&
           in_array( 'jpg', $wgFileExtensions ) &&
           in_array( 'jpeg', $wgFileExtensions ) &&
-          in_array( 'gif', $wgFileExtensions ) &&
-          in_array( 'webp', $wgFileExtensions ),
+          in_array( 'gif', $wgFileExtensions ),
     'E2S2 file policy: raster types allowed' );
 t_assert( in_array( 'svg', $wgFileExtensions ) === false,
     'E2S2 file policy: SVG disallowed' );
+t_assert( in_array( 'webp', $wgFileExtensions ) === false,
+    'E2S2 file policy: WebP excluded (1.14 has no WebP support)' );
 t_assert( $wgCheckFileExtensions === true,
     'E2S2 file policy: extension checks enabled' );
 t_assert( $wgStrictFileExtensions === true,
@@ -452,6 +453,40 @@ t_assert( is_int( $wgMaxUploadSize ) && $wgMaxUploadSize > 0 &&
     'E2S2 size policy: upload size bounded at 20 MB or less' );
 t_assert( $wgEnableUploads === true,
     'E2S2 upload: local uploads enabled for the trusted editors' );
+
+// The size cap must be enforced on the local-upload path, not only in config.
+t_assert( HomebreweryWiki::isUploadSizeAllowed( 1024 ) === true,
+    'E2S2 size guard: small file allowed' );
+t_assert( HomebreweryWiki::isUploadSizeAllowed( HOMEBREWERYWIKI_MAX_UPLOAD_SIZE ) === true,
+    'E2S2 size guard: file exactly at the 10 MB boundary allowed' );
+t_assert( HomebreweryWiki::isUploadSizeAllowed( HOMEBREWERYWIKI_MAX_UPLOAD_SIZE + 1 ) === false,
+    'E2S2 size guard: one byte over the boundary denied' );
+t_assert( HomebreweryWiki::isUploadSizeAllowed( false ) === false,
+    'E2S2 size guard: unknown size denied' );
+
+$hbwTmpUpload = tempnam( sys_get_temp_dir(), 'hbwup' );
+$hbwHandle = fopen( $hbwTmpUpload, 'w' );
+ftruncate( $hbwHandle, HOMEBREWERYWIKI_MAX_UPLOAD_SIZE );
+fclose( $hbwHandle );
+clearstatcache();
+$hbwUploadError = 'unset';
+t_assert( HomebreweryWiki::onUploadVerification( 'Boundary.png', $hbwTmpUpload, $hbwUploadError ) === true &&
+          $hbwUploadError === 'unset',
+    'E2S2 size hook: local file at the boundary accepted' );
+
+$hbwHandle = fopen( $hbwTmpUpload, 'w' );
+ftruncate( $hbwHandle, HOMEBREWERYWIKI_MAX_UPLOAD_SIZE + 1 );
+fclose( $hbwHandle );
+clearstatcache();
+$hbwUploadError = '';
+t_assert( HomebreweryWiki::onUploadVerification( 'TooBig.png', $hbwTmpUpload, $hbwUploadError ) === false &&
+          $hbwUploadError !== '',
+    'E2S2 size hook: oversized local file rejected with an error' );
+
+$hbwUploadError = '';
+t_assert( HomebreweryWiki::onUploadVerification( 'Missing.png', sys_get_temp_dir() . '/hbw-no-such-file', $hbwUploadError ) === false,
+    'E2S2 size hook: unreadable temporary file rejected' );
+@unlink( $hbwTmpUpload );
 
 // --- E2S3: brew pages inherit the global read policy (T1-T2) ---
 // No brew-specific read override: the extension never adds the brew

@@ -48,10 +48,13 @@ unreadable to anonymous visitors.
 ### Uploads
 
 Only logged-in (admin-created) accounts hold the `upload` right. The file
-policy is raster-only (`png`, `jpg`, `jpeg`, `gif`, `webp`); SVG is excluded
-because it can carry script (Q14). Extension checks and the strict allowlist
-are enabled, uploads are capped at 10 MB, and `$wgEnableUploads` is turned on
-because MediaWiki 1.14 ships with local uploads disabled.
+policy is raster-only (`png`, `jpg`, `jpeg`, `gif`); SVG is excluded because it
+can carry script (Q14) and WebP because MediaWiki 1.14 has no WebP MIME or
+thumbnail support. Extension checks and the strict allowlist are enabled,
+`$wgEnableUploads` is turned on (1.14 ships with local uploads disabled), and
+uploads are capped at 10 MB. Because 1.14 applies `$wgMaxUploadSize` only to
+URL-copy uploads, the `UploadVerification` hook enforces the same cap on local
+uploads before the file is stored.
 
 ## Build & test
 
