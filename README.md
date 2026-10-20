@@ -25,6 +25,26 @@ functions, template literals, classes, or ES modules.
 
 3. Registers the `Manual:` namespace (id 3000) and `Manual_talk` (id 3001).
 
+## Permissions
+
+The extension applies the account policy from `docs/QUESTIONS.md` Q21 when it
+loads (all values can be overridden later in `LocalSettings.php`):
+
+- Anonymous visitors are **read-only**: no `edit`, `createpage`, `createtalk`,
+  `upload`, or `createaccount` (self-registration is disabled).
+- Any logged-in (admin-created) account is a trusted editor: `edit`,
+  `createpage`, `createtalk`, `upload`.
+- The brew namespaces carry a dedicated `homebrewery-edit` right, granted to
+  `user` and `sysop`. A `userCan` hook denies `edit`/`create` on `Manual:` and
+  `Manual_talk` pages to accounts without it, so brew authoring stays locked
+  even if anonymous editing is re-enabled wiki-wide.
+- `read` is never touched: brew pages follow the global read policy exactly
+  like normal pages.
+
+MediaWiki 1.14's `$wgNamespaceProtection` is deliberately **not** used — it is
+checked for every action, including `read`, and would make brew pages
+unreadable to anonymous visitors.
+
 ## Build & test
 
 Syntax check:
