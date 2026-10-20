@@ -136,22 +136,99 @@ t_assert( HomebreweryWiki::isBrewPreview( null, true, null ) === false,
     'E1S4 preview: null title => not a preview' );
 
 /**
- * Minimal stand-in for WebRequest in the preview-source fallback test.
+ * Minimal stand-in for WebRequest, covering the accessors the extension and
+ * the preview-source helper use.
  */
 class HbwTestRequest {
+    /** @var bool Whether the request was a POST. */
     var $posted;
+    /** @var string Value returned by getText() (the raw textbox). */
     var $text;
-    function __construct( $posted, $text ) {
+    /** @var array Request values keyed by name. */
+    var $vals;
+
+    /**
+     * @param bool   $posted Whether the request was a POST.
+     * @param string $text   Raw wpTextbox1 value.
+     * @param array  $vals   Request values (for getCheck/getVal).
+     */
+    function __construct( $posted, $text, $vals = array() ) {
         $this->posted = $posted;
         $this->text   = $text;
+        $this->vals   = $vals;
     }
+
+    /**
+     * @return bool Whether the request was a POST.
+     */
     function wasPosted() {
         return $this->posted;
     }
+
+    /**
+     * @param string $name Field name.
+     * @return string Field value (the textbox for wpTextbox1).
+     */
     function getText( $name ) {
         return $this->text;
     }
+
+    /**
+     * @param string $name Field name.
+     * @return mixed Request value or null.
+     */
+    function getVal( $name ) {
+        return isset( $this->vals[$name] ) ? $this->vals[$name] : null;
+    }
+
+    /**
+     * Mirror WebRequest::getCheck(): truthy and neither '' nor '0'.
+     *
+     * @param string $name Field name.
+     * @return bool
+     */
+    function getCheck( $name ) {
+        $value = $this->getVal( $name );
+        return ( $value !== null && $value !== '' && $value !== '0' );
+    }
 }
+
+/**
+ * Minimal OutputPage stand-in for the preview-replacement guard.
+ */
+class HbwTestOutput {
+    /**
+     * @param string $text Wikitext.
+     * @return string Parsed HTML (identity is enough here).
+     */
+    function parse( $text ) {
+        return $text;
+    }
+}
+
+// Preview recogniser covers all four 1.14 entry points (E1S4T1).
+t_assert( HomebreweryWiki::isPreviewRequest(
+        new HbwTestRequest( true, '', array( 'wpPreview' => 'Show preview' ) ) ) === true,
+    'E1S4 preview request: wpPreview recognised' );
+t_assert( HomebreweryWiki::isPreviewRequest(
+        new HbwTestRequest( true, '', array( 'wpLivePreview' => '1' ) ) ) === true,
+    'E1S4 preview request: wpLivePreview recognised' );
+t_assert( HomebreweryWiki::isPreviewRequest(
+        new HbwTestRequest( false, '', array( 'preview' => 'yes' ) ) ) === true,
+    'E1S4 preview request: preview=yes recognised' );
+t_assert( HomebreweryWiki::isPreviewRequest(
+        new HbwTestRequest( false, '', array() ) ) === false,
+    'E1S4 preview request: no flags => not a preview' );
+t_assert( HomebreweryWiki::isPreviewRequest( null ) === false,
+    'E1S4 preview request: non-object => false' );
+
+// EditPage's own formtype covers preview-on-open via `previewonfirst`, which
+// carries no request flag (E1S4T1).
+HomebreweryWiki::$editFormPreview = true;
+t_assert( HomebreweryWiki::isPreviewRequest(
+        new HbwTestRequest( false, '', array() ) ) === true,
+    'E1S4 preview request: EditPage preview-on-first state recognised' );
+HomebreweryWiki::$editFormPreview = false;
 
 // Posted preview source is trimmed exactly as EditPage::safeUnicodeInput does
 // (E1S4T2), so the preview payload matches what a save would store.
@@ -161,6 +238,59 @@ t_assert( HomebreweryWiki::previewSource( $fake, null ) === "= Title =\n\nbody",
 $fakeGet = new HbwTestRequest( false, '' );
 t_assert( HomebreweryWiki::previewSource( $fakeGet, null ) === '',
     'E1S4 preview source: no article and no POST => empty' );
+
+// OutputPageBeforeHTML fires for every parsed fragment (edit notices, tools,
+// diffs) as well as the preview body, so replacement is armed by the edit form
+// and gated on the stock previewnote marker, then disarmed (E1S4T4).
+$savedTitle   = isset( $wgTitle ) ? $wgTitle : null;
+$savedRequest = isset( $wgRequest ) ? $wgRequest : null;
+$savedArticle = isset( $wgArticle ) ? $wgArticle : null;
+
+$wgTitle   = $brewTitle;
+$wgArticle = null;
+$wgRequest = new HbwTestRequest( true, "= Preview =\n\nbody\n", array( 'wpPreview' => 'Show preview' ) );
+$out       = new HbwTestOutput();
+
+$fragment = '<div class="mw-editTools">tools</div>';
+HomebreweryWiki::$editFormPreview = true;
+HomebreweryWiki::$previewArmed = false;
+HomebreweryWiki::$previewSourceText = "= Preview =\n\nbody";
+
+$text = $fragment;
+HomebreweryWiki::onOutputPageBeforeHTML( $out, $text );
+t_assert( $text === $fragment,
+    'E1S4 guard: unarmed handler leaves parsed fragments alone' );
+
+HomebreweryWiki::$previewArmed = true;
+$text = $fragment;
+HomebreweryWiki::onOutputPageBeforeHTML( $out, $text );
+t_assert( $text === $fragment,
+    'E1S4 guard: fragment without previewnote is not replaced' );
+t_assert( HomebreweryWiki::$previewArmed === true,
+    'E1S4 guard: unrelated fragment keeps the handler armed' );
+
+$previewBody = "<h2>Preview</h2>\n<div class='previewnote'>note</div>\n= Preview =\n\nbody";
+$text = $previewBody;
+HomebreweryWiki::onOutputPageBeforeHTML( $out, $text );
+t_assert( strpos( $text, 'id="hbw-source"' ) !== false &&
+          strpos( $text, 'hbw-brew' ) !== false,
+    'E1S4 guard: stock preview body replaced with the shared placeholder' );
+t_assert( strpos( $text, 'previewnote' ) !== false,
+    'E1S4 guard: stock preview notice preserved' );
+t_assert( HomebreweryWiki::$previewArmed === false,
+    'E1S4 guard: handler disarmed after the preview body' );
+
+$again = $previewBody;
+HomebreweryWiki::onOutputPageBeforeHTML( $out, $again );
+t_assert( $again === $previewBody,
+    'E1S4 guard: replacement is single-shot' );
+
+HomebreweryWiki::$editFormPreview = false;
+HomebreweryWiki::$previewArmed = false;
+HomebreweryWiki::$previewSourceText = null;
+$wgTitle   = $savedTitle;
+$wgRequest = $savedRequest;
+$wgArticle = $savedArticle;
 
 // --- E1S3: renderer asset list & load order (T1) ---
 // markdown parser first, sanitizer second, render module last.

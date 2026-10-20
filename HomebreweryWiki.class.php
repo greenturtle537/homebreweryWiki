@@ -32,6 +32,31 @@ class HomebreweryWiki {
     public static $previewSourceText = null;
 
     /**
+     * Whether the edit form being rendered is a preview (E1S4).  EditPage
+     * derives this itself: a submitted preview sets formtype='preview', and so
+     * does preview-on-open, which previewOnOpen() can enable through the
+     * `previewonfirst` user preference without any wpPreview / preview=yes
+     * request flag.  Captured in EditPage::showEditForm:initial so the shared
+     * preview predicate sees all three entry points.
+     *
+     * @var bool
+     */
+    public static $editFormPreview = false;
+
+    /**
+     * Whether the next OutputPageBeforeHTML preview body may be replaced
+     * (E1S4).  OutputPageBeforeHTML also fires for every parsed fragment added
+     * through OutputPage::addParserOutput() (edit notices, tools, warnings) and
+     * for diffs, so a request-level check alone could clobber unrelated output.
+     * Armed only by EditPage::showEditForm:initial for a brew preview, and
+     * cleared after the single preview body (marked by `previewnote`) is
+     * swapped.
+     *
+     * @var bool
+     */
+    public static $previewArmed = false;
+
+    /**
      * $wgExtensionFunctions entry point.  Called once, after MediaWiki is
      * fully initialised.
      *
@@ -142,9 +167,11 @@ class HomebreweryWiki {
     /**
      * Whether the current request asks for an edit preview (E1S4).
      *
-     * MediaWiki 1.14 previews arrive three ways: the Show preview button
-     * (wpPreview), the live-preview button (wpLivePreview, which we downgrade
-     * to a normal submit), and preview-on-open (preview=yes).
+     * MediaWiki 1.14 previews arrive four ways: the Show preview button
+     * (wpPreview), the live-preview button (wpLivePreview, which we downgrade to
+     * a normal submit), preview-on-open (preview=yes), and preview-on-open from
+     * the `previewonfirst` preference, which carries no request flag at all and
+     * is recognised through EditPage's formtype.
      *
      * @param WebRequest|mixed $request Request object (non-object => false).
      * @return bool
@@ -152,6 +179,9 @@ class HomebreweryWiki {
     public static function isPreviewRequest( $request ) {
         if ( !is_object( $request ) || !method_exists( $request, 'getCheck' ) ) {
             return false;
+        }
+        if ( self::$editFormPreview ) {
+            return true;
         }
         if ( $request->getCheck( 'wpPreview' ) || $request->getCheck( 'wpLivePreview' ) ) {
             return true;
@@ -243,9 +273,11 @@ class HomebreweryWiki {
      * The "Preview" heading and preview notice are kept.
      *
      * MediaWiki 1.14 signature: ( &$out, &$text ).  EditPage::showPreview()
-     * fires this explicitly for previews; OutputPage::addParserOutput() fires
-     * it for ordinary parsed output, which is why the brew-preview guard runs
-     * first.
+     * fires this explicitly for previews, but OutputPage::addParserOutput()
+     * (edit notices, edit tools, warnings) and DifferenceEngine fire it too, so
+     * the handler runs only when EditPage::showEditForm:initial armed it for a
+     * brew preview *and* the fragment is the stock preview body (its
+     * `previewnote` marker is present).  It disarms after that single swap.
      *
      * @param OutputPage &$out  Output page being built.
      * @param string     &$text Preview HTML (replaced on a brew preview).
@@ -257,9 +289,13 @@ class HomebreweryWiki {
         $preview = self::isPreviewRequest( $wgRequest );
         $diff    = $wgRequest->getVal( 'diff' );
 
-        if ( ! self::isBrewPreview( $wgTitle, $preview, $diff ) ) {
+        if ( !self::$previewArmed ||
+             ! self::isBrewPreview( $wgTitle, $preview, $diff ) ||
+             strpos( $text, 'previewnote' ) === false ) {
             return true;
         }
+        // Single shot: the preview body appears once per render.
+        self::$previewArmed = false;
 
         $source = ( self::$previewSourceText !== null )
             ? self::$previewSourceText
@@ -282,8 +318,10 @@ class HomebreweryWiki {
      *
      * The form render is the point where EditPage has already parsed and
      * trimmed the submitted text, so this is the exact source a save would
-     * store.  Preview-on-open (preview=yes) is covered too, because
-     * initialiseForm() fills textbox1 before showEditForm() runs.
+     * store.  EditPage also knows here whether this is a preview (formtype),
+     * which covers preview-on-open via the `previewonfirst` preference even
+     * when the request carries no preview flag.  The preview body replacement
+     * is armed on the same condition.
      *
      * MediaWiki 1.14 signature: ( &$editpage ).
      *
@@ -292,6 +330,8 @@ class HomebreweryWiki {
      */
     public static function onEditPageShowEditFormInitial( &$editpage ) {
         self::$previewSourceText = null;
+        self::$editFormPreview = false;
+        self::$previewArmed = false;
 
         if ( !( $editpage instanceof EditPage ) ) {
             return true;
@@ -301,6 +341,8 @@ class HomebreweryWiki {
             return true;
         }
 
+        self::$editFormPreview = ( $editpage->formtype === 'preview' );
+        self::$previewArmed = self::$editFormPreview;
         self::$previewSourceText = $editpage->textbox1;
         return true;
     }
