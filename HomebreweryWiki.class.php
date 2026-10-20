@@ -613,8 +613,9 @@ class HomebreweryWiki {
 	/**
 	 * URL of the compiled upstream theme CSS loaded inside the iframe
 	 * (E3.5S2). Override $wgHomebreweryWikiThemeCss in LocalSettings.php to
-	 * point at an admin-supplied theme directory; the default is the vendored
-	 * build artifact.
+	 * point at an admin-supplied theme directory on the wiki's own origin
+	 * (the shell CSP allows only 'self' styles and fonts); the default is the
+	 * vendored build artifact.
 	 *
 	 * @return string
 	 */

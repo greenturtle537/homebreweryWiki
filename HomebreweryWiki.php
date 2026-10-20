@@ -43,7 +43,9 @@ define( 'HOMEBREWERYWIKI_THEME_CSS', '/extensions/HomebreweryWiki/HomebreweryWik
 /**
  * Compiled theme CSS loaded inside the iframe (E3.5S2).  NULL uses the
  * vendored build artifact; set it in LocalSettings.php to an admin-supplied
- * theme directory when the bundled assets are not licence-cleared.
+ * theme directory when the bundled assets are not licence-cleared.  The URL
+ * must be same-origin: the shell CSP allows only 'self' styles and fonts, so
+ * an off-origin URL is blocked silently and the brew renders untitled.
  */
 $wgHomebreweryWikiThemeCss = null;
 

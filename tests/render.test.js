@@ -346,8 +346,8 @@ function renderRoot( page ) {
     ok( !!rendered && !rendered.querySelector( 'picture' ), 'media: picture removed' );
     ok( !!rendered && !/poster/i.test( rendered.innerHTML ), 'media: poster removed' );
     ok( !!rendered && !/srcset/i.test( rendered.innerHTML ), 'media: srcset removed' );
-    ok( !!img && img.getAttribute( 'src' ) === '/images/ok.png',
-        'media: legitimate img src kept' );
+    ok( !!img && img.getAttribute( 'src' ) === 'http://wiki.example.test/images/ok.png',
+        'media: legitimate img src kept (resolved against the parent page)' );
     ok( page.errors.length === 0, 'media: no console errors' );
 }() );
 
@@ -383,8 +383,8 @@ function renderRoot( page ) {
         'images: external src removed' );
     ok( imgs.length === 3 && imgs[0].getAttribute( 'data-hbw-blocked' ) === 'external',
         'images: external src flagged' );
-    ok( imgs.length === 3 && imgs[1].getAttribute( 'src' ) === '/images/x.png',
-        'images: same-origin src kept' );
+    ok( imgs.length === 3 && imgs[1].getAttribute( 'src' ) === 'http://wiki.example.test/images/x.png',
+        'images: same-origin src kept (resolved against the parent page)' );
     ok( imgs.length === 3 && /^data:image\//.test( imgs[2].getAttribute( 'src' ) ),
         'images: inline data image kept' );
     ok( page.errors.length === 0, 'images: no console errors' );
@@ -436,7 +436,7 @@ function renderRoot( page ) {
         'vectors: safe colour kept beside expression()' );
     ok( expressionStyle.toLowerCase().indexOf( 'expression' ) === -1,
         'vectors: expression() removed' );
-    ok( !!img && img.getAttribute( 'src' ) === '/images/ok.png',
+    ok( !!img && img.getAttribute( 'src' ) === 'http://wiki.example.test/images/ok.png',
         'vectors: same-origin img kept' );
     ok( page.errors.length === 0, 'vectors: no console errors' );
 }() );
@@ -519,7 +519,7 @@ function offOriginFetches( win, root ) {
     ok( !!rendered && !!rendered.querySelector( 'h1' ) &&
         rendered.querySelector( 'h1' ).textContent === 'Attack Brew',
         'attack brew: benign prose survives (sanitizer, not escaper)' );
-    ok( !!rendered && rendered.querySelectorAll( 'img[src="/images/ok.png"]' ).length >= 2,
+    ok( !!rendered && rendered.querySelectorAll( 'img[src="http://wiki.example.test/images/ok.png"]' ).length >= 2,
         'attack brew: same-origin images survive' );
     ok( !!rendered && !!rendered.querySelector( 'img[src^="data:image/"]' ),
         'attack brew: inline data image survives' );
@@ -1527,6 +1527,34 @@ function offOriginFetches( win, root ) {
     ok( inPage === 1,
         'anchors: in-page anchors stay in the frame (target=_self)' );
     ok( page.errors.length === 0, 'anchors: no console errors' );
+}() );
+
+// --- E3.5S1: relative URLs resolve against the parent page, not the shell ---
+( function () {
+    var source = '# Relative\n\n'
+        + '[Lore](lore/elves)\n\n'
+        + '[Jump](#relative)\n\n'
+        + '![Map](images/map.png)\n';
+    var page = makePage( source );
+    var rendered = renderRoot( page );
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+    var img = rendered ? rendered.querySelector( 'img' ) : null;
+    var lore = null;
+    var i;
+
+    for ( i = 0; i < links.length; i++ ) {
+        if ( links[ i ].textContent === 'Lore' ) {
+            lore = links[ i ];
+        }
+    }
+
+    ok( !!lore && lore.getAttribute( 'href' ) === 'http://wiki.example.test/lore/elves',
+        'relative links: href resolved against the parent document' );
+    ok( !!lore && lore.getAttribute( 'target' ) === '_top',
+        'relative links: resolved link still targets the parent' );
+    ok( !!img && img.getAttribute( 'src' ) === 'http://wiki.example.test/images/map.png',
+        'relative images: src resolved against the parent document' );
+    ok( page.errors.length === 0, 'relative urls: no console errors' );
 }() );
 
 // --- E3.5S4 T1/T2: page stack fits the host pane ---

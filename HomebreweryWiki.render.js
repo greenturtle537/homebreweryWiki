@@ -282,6 +282,22 @@
     }
 
     /**
+     * Resolve a URL written in a brew against the parent document.
+     *
+     * The sanitized DOM is injected into the same-origin shell iframe, whose
+     * own URL is not the article URL, so a relative `href`/`src` keeps its
+     * meaning only after it is made absolute here (E3.5S1).
+     *
+     * @param {string} value
+     * @return {string}
+     */
+    function resolveParentUrl( value ) {
+        var anchor = document.createElement( 'a' );
+        anchor.href = value;
+        return anchor.href;
+    }
+
+    /**
      * Whether an image src may be loaded: inline data images or our own origin
      * only (D2 / F3).  Relative URLs resolve against the current page.
      *
@@ -326,6 +342,9 @@
                 // Wiki links navigate the parent (E3.5S3T2); in-page anchors
                 // scroll the brew itself, so they stay inside the frame.
                 var href = node.getAttribute( 'href' ) || '';
+                if ( href.charAt( 0 ) !== '#' && href !== '' ) {
+                    node.setAttribute( 'href', resolveParentUrl( href ) );
+                }
                 node.setAttribute(
                     'target', href.charAt( 0 ) === '#' ? '_self' : '_top'
                 );
@@ -340,6 +359,10 @@
                     if ( !node.getAttribute( 'alt' ) ) {
                         node.setAttribute( 'alt', 'External image blocked' );
                     }
+                } else if ( src && !/^data:/i.test( src ) ) {
+                    // Same reason as anchors: a relative src would otherwise
+                    // resolve against the shell iframe URL instead of the page.
+                    node.setAttribute( 'src', resolveParentUrl( src ) );
                 }
             }
         }
