@@ -87,6 +87,48 @@ class HomebreweryWiki {
     }
 
     /**
+     * Whether a namespace id belongs to the brew content type (E2S1).
+     *
+     * @param int $ns Namespace id.
+     * @return bool
+     */
+    public static function isBrewNamespace( $ns ) {
+        return $ns === NS_MANUAL || $ns === NS_MANUAL_TALK;
+    }
+
+    /**
+     * userCan hook (E2S1).  Deny edit/create on brew pages to accounts without
+     * the brew-edit right, leaving read and every other action untouched so
+     * brew pages keep inheriting the global read policy (E2S3).
+     *
+     * MediaWiki 1.14 signature: ( &$title, &$user, $action, &$result ).
+     * Returning false with $result = false yields a permission error
+     * (badaccess-group0); returning true lets the stock checks run.
+     *
+     * @param Title &$title  Page being checked.
+     * @param User  &$user   User performing the action.
+     * @param string $action Action being checked (edit, read, move, ...).
+     * @param bool  &$result Hook result (set false to deny).
+     * @return bool True to continue with the stock permission checks.
+     */
+    public static function onUserCan( &$title, &$user, $action, &$result ) {
+        if ( ! ( $title instanceof Title ) ) {
+            return true;
+        }
+        if ( $action !== 'edit' && $action !== 'create' ) {
+            return true;
+        }
+        if ( ! HomebreweryWiki::isBrewNamespace( $title->getNamespace() ) ) {
+            return true;
+        }
+        if ( $user instanceof User && $user->isAllowed( HOMEBREWERYWIKI_EDIT_RIGHT ) ) {
+            return true;
+        }
+        $result = false;
+        return false;
+    }
+
+    /**
      * ArticleSave hook.  Reject brew saves whose source is not valid UTF-8
      * text, so a corrupt revision can never be stored (E1S1T7).
      *

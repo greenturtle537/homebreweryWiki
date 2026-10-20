@@ -357,5 +357,69 @@ $ph_nl2 = HomebreweryWiki::brewPlaceholder( "\n= Title =" );
 t_assert( strpos( $ph_nl2, '<noscript><pre class="hbw-brew-text">' . "\n\n= Title =" ) !== false,
     'E1S2 placeholder: noscript keeps a real leading newline' );
 
+// --- E2S1: trusted-editor edit/create gating (T1-T4) ---
+// Anonymous visitors are read-only; every logged-in (admin-created) account is
+// a trusted editor.  The brew namespaces are guarded by the userCan hook so the
+// gate survives a wiki-wide change to anonymous editing.
+global $wgGroupPermissions;
+
+t_assert( isset( $wgGroupPermissions['*'][HOMEBREWERYWIKI_EDIT_RIGHT] ) &&
+          $wgGroupPermissions['*'][HOMEBREWERYWIKI_EDIT_RIGHT] === false,
+    'E2S1 perms: anonymous lacks the brew-edit right' );
+t_assert( !empty( $wgGroupPermissions['user'][HOMEBREWERYWIKI_EDIT_RIGHT] ),
+    'E2S1 perms: logged-in group holds the brew-edit right' );
+
+$anon = new User();
+t_assert( $anon->isAnon() === true, 'E2S1 perms: test user is anonymous' );
+t_assert( $anon->isAllowed( 'read' ) === true, 'E2S1 perms: anonymous can read' );
+t_assert( $anon->isAllowed( 'edit' ) === false, 'E2S1 perms: anonymous cannot edit' );
+t_assert( $anon->isAllowed( 'createpage' ) === false,
+    'E2S1 perms: anonymous cannot create pages' );
+t_assert( $anon->isAllowed( 'createtalk' ) === false,
+    'E2S1 perms: anonymous cannot create talk pages' );
+t_assert( $anon->isAllowed( 'upload' ) === false, 'E2S1 perms: anonymous cannot upload' );
+t_assert( $anon->isAllowed( 'createaccount' ) === false,
+    'E2S1 perms: self-registration disabled for anonymous visitors' );
+
+$trusted = User::newFromName( 'Admin' );
+if ( ! ( $trusted instanceof User ) || $trusted->getId() === 0 ) {
+    $trusted = User::newFromId( 1 );
+}
+t_assert( $trusted instanceof User && $trusted->getId() > 0,
+    'E2S1 perms: trusted test account exists' );
+t_assert( $trusted->isAllowed( HOMEBREWERYWIKI_EDIT_RIGHT ) === true,
+    'E2S1 perms: trusted account holds the brew-edit right' );
+t_assert( $trusted->isAllowed( 'edit' ) === true,
+    'E2S1 perms: trusted account can edit' );
+
+$brewGateTitle = Title::newFromText( 'Manual:PermTest' );
+$mainGateTitle = Title::newFromText( 'Main Page' );
+$res = true;
+t_assert( HomebreweryWiki::onUserCan( $brewGateTitle, $anon, 'edit', $res ) === false &&
+          $res === false,
+    'E2S1 guard: anonymous brew edit denied' );
+$res = true;
+t_assert( HomebreweryWiki::onUserCan( $brewGateTitle, $anon, 'create', $res ) === false,
+    'E2S1 guard: anonymous brew create denied' );
+$res = true;
+t_assert( HomebreweryWiki::onUserCan( $brewGateTitle, $anon, 'read', $res ) === true,
+    'E2S1 guard: anonymous brew read untouched' );
+$res = true;
+t_assert( HomebreweryWiki::onUserCan( $brewGateTitle, $trusted, 'edit', $res ) === true,
+    'E2S1 guard: trusted brew edit allowed' );
+$res = true;
+t_assert( HomebreweryWiki::onUserCan( $mainGateTitle, $anon, 'edit', $res ) === true,
+    'E2S1 guard: non-brew pages not filtered by the hook' );
+$talkGateTitle = Title::newFromText( 'Manual talk:PermTest' );
+$res = true;
+t_assert( HomebreweryWiki::onUserCan( $talkGateTitle, $anon, 'edit', $res ) === false,
+    'E2S1 guard: anonymous brew talk edit denied' );
+
+// T3 / E2S3 baseline: anonymous read is resolved by the global policy alone,
+// identically for brew and normal pages.
+t_assert( count( $brewGateTitle->getUserPermissionsErrors( 'read', $anon ) ) === 0 &&
+          count( $mainGateTitle->getUserPermissionsErrors( 'read', $anon ) ) === 0,
+    'E2S1 perms: anonymous read allowed on brew and normal pages' );
+
 echo "\n$pass passed, $fail failed\n";
 exit( $fail > 0 ? 1 : 0 );

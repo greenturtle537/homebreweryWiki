@@ -18,7 +18,7 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 }
 
 /** Extension version, surfaced on Special:Version. */
-define( 'HOMEBREWERYWIKI_VERSION', '0.4.0' );
+define( 'HOMEBREWERYWIKI_VERSION', '0.5.0' );
 
 /**
  * Front-end renderer assets (E1S3), relative to $wgScriptPath, in load order.
@@ -75,6 +75,38 @@ $wgExtraNamespaces[NS_MANUAL_TALK] = 'Manual_talk';
 $wgContentNamespaces[] = NS_MANUAL;
 
 /**
+ * Permissions & access (E2S1, decision Q21).
+ *
+ * Accounts are created by an admin only, so "trusted editor" == any logged-in
+ * account (the `user` group).  Anonymous visitors stay read-only.
+ *
+ * The brew namespaces get their own right so authoring can be guarded even if
+ * an administrator re-grants `edit` to anonymous users later.  The guard is
+ * applied through the userCan hook (see HomebreweryWiki::onUserCan), NOT
+ * $wgNamespaceProtection: on MediaWiki 1.14 namespace protection is checked
+ * for every action including `read`, which would make brew pages unreadable to
+ * anonymous visitors and break the read-policy requirement (E2S3).
+ */
+define( 'HOMEBREWERYWIKI_EDIT_RIGHT', 'homebrewery-edit' );
+
+$wgGroupPermissions['*'][HOMEBREWERYWIKI_EDIT_RIGHT]     = false;
+$wgGroupPermissions['user'][HOMEBREWERYWIKI_EDIT_RIGHT]  = true;
+$wgGroupPermissions['sysop'][HOMEBREWERYWIKI_EDIT_RIGHT] = true;
+
+/* Anonymous visitors: read-only, no uploads and no self-registration (Q21). */
+$wgGroupPermissions['*']['edit']          = false;
+$wgGroupPermissions['*']['createpage']    = false;
+$wgGroupPermissions['*']['createtalk']    = false;
+$wgGroupPermissions['*']['upload']        = false;
+$wgGroupPermissions['*']['createaccount'] = false;
+
+/* Logged-in (admin-created) accounts are the trusted editors. */
+$wgGroupPermissions['user']['edit']       = true;
+$wgGroupPermissions['user']['createpage'] = true;
+$wgGroupPermissions['user']['createtalk'] = true;
+$wgGroupPermissions['user']['upload']     = true;
+
+/**
  * Message files.  On 1.14 these are plain PHP files holding a $messages array;
  * they are loaded on demand by the framework.
  */
@@ -125,6 +157,13 @@ $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
  * one render path (DESIGN D3).  EditPageBeforeEditButtons drops the AJAX
  * live-preview handler on brew pages for the same reason.
  */
+/**
+ * Brew authoring guard (E2S1).  Fired for every action checked by
+ * Title::getUserPermissionsErrorsInternal(); only edit/create on the brew
+ * namespaces are filtered, so read keeps following the global policy (E2S3).
+ */
+$wgHooks['userCan'][] = 'HomebreweryWiki::onUserCan';
+
 $wgHooks['ArticleViewHeader'][] = 'HomebreweryWiki::onArticleViewHeader';
 $wgHooks['BeforePageDisplay'][] = 'HomebreweryWiki::onBeforePageDisplay';
 $wgHooks['OutputPageBeforeHTML'][] = 'HomebreweryWiki::onOutputPageBeforeHTML';
