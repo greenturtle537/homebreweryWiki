@@ -504,8 +504,10 @@
      *
      * The replacement keeps one character per source character, so match
      * offsets stay valid against the unmasked line; only the characters
-     * between a pair of backticks are replaced.  An unmatched backtick is
-     * ordinary prose, matching the walker's rule.
+     * between a pair of backticks are replaced.  The closing run must be the
+     * same length as the opening run, so `` ``a `b` `` `` is one span and
+     * every span on a line is masked, not just the first.  An unmatched
+     * backtick is ordinary prose, matching the walker's rule.
      *
      * @param {string} line source line
      * @return {string} line with code spans masked by NUL characters
@@ -513,20 +515,52 @@
     function maskInlineCode( line ) {
         var text = String( line );
         var chars = text.split( '' );
-        var open = -1;
-        var i;
-        for ( i = 0; i < text.length; i++ ) {
+        var i = 0;
+        var open;
+        var close;
+        var run;
+        var j;
+        var k;
+        var c;
+
+        while ( i < text.length ) {
             if ( text.charAt( i ) !== '`' ) {
+                i++;
                 continue;
             }
-            if ( open === -1 ) {
-                open = i;
+            open = i;
+            while ( i < text.length && text.charAt( i ) === '`' ) {
+                i++;
+            }
+            run = i - open;
+
+            // CommonMark matches the closing run by length: a one-backtick
+            // opener is not closed by two backticks, and vice versa.
+            close = -1;
+            j = i;
+            while ( j < text.length ) {
+                if ( text.charAt( j ) !== '`' ) {
+                    j++;
+                    continue;
+                }
+                k = j;
+                while ( k < text.length && text.charAt( k ) === '`' ) {
+                    k++;
+                }
+                if ( k - j === run ) {
+                    close = k;
+                    break;
+                }
+                j = k;
+            }
+            if ( close === -1 ) {
+                // Unmatched opener: ordinary prose; keep scanning after it.
                 continue;
             }
-            for ( ; open <= i; open++ ) {
-                chars[ open ] = '\u0000';
+            for ( c = open; c < close; c++ ) {
+                chars[ c ] = '\u0000';
             }
-            open = -1;
+            i = close;
         }
         return chars.join( '' );
     }

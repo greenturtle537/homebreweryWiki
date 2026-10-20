@@ -20,7 +20,7 @@ Counts
   34 font files
   91 image files
 
-The path list below also names 12 build-input .less files and 3 license
+The path list below also names 14 build-input .less files and 3 license
 files, so the total number of path lines is larger than 125.
 
 Three additional .ttf fallbacks are referenced by the Font Awesome CSS

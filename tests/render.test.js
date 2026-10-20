@@ -947,6 +947,41 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'fenced definitions: no console errors' );
 }() );
 
+// --- E3B1 review: every span on a line is code, not just the first ---
+( function () {
+    var source = 'Text `a` and `[^b]` here, prose cites beta.[^b]\n\n'
+        + '[^b]: beta note.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-b',
+        'two spans: only the prose reference links' );
+    ok( notes.length === 1, 'two spans: one note emitted' );
+    ok( text.indexOf( '[^b]' ) !== -1,
+        'two spans: the code span renders its brackets literally' );
+    ok( text.indexOf( 'hbw-footnote-mark' ) === -1,
+        'two spans: no marker leaked as code text' );
+    ok( page.errors.length === 0, 'two spans: no console errors' );
+}() );
+
+// --- E3B1 review: a double-backtick span is one span, not two ---
+( function () {
+    var source = 'Has ``a ` [^b]`` span, prose cites beta.[^b]\n\n'
+        + '[^b]: beta note.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-b',
+        'double backticks: only the prose reference links' );
+    ok( notes.length === 1, 'double backticks: one note emitted' );
+    ok( page.errors.length === 0, 'double backticks: no console errors' );
+}() );
+
 // --- E3B1: a definition may contain inline code without losing its body ---
 ( function () {
     var source = 'Cites alpha.[^a]\n\n'
