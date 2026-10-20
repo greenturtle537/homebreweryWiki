@@ -182,14 +182,14 @@ class HbwTestRequest {
     }
 
     /**
-     * Mirror WebRequest::getCheck(): truthy and neither '' nor '0'.
+     * Mirror WebRequest::getCheck() (1.14): presence connotes truth, so any
+     * supplied value — including '' and '0' — counts as true.
      *
      * @param string $name Field name.
      * @return bool
      */
     function getCheck( $name ) {
-        $value = $this->getVal( $name );
-        return ( $value !== null && $value !== '' && $value !== '0' );
+        return ( $this->getVal( $name ) !== null );
     }
 }
 
@@ -213,6 +213,10 @@ t_assert( HomebreweryWiki::isPreviewRequest(
 t_assert( HomebreweryWiki::isPreviewRequest(
         new HbwTestRequest( true, '', array( 'wpLivePreview' => '1' ) ) ) === true,
     'E1S4 preview request: wpLivePreview recognised' );
+// 1.14 getCheck() is presence-based, so a present-but-empty flag still counts.
+t_assert( HomebreweryWiki::isPreviewRequest(
+        new HbwTestRequest( true, '', array( 'wpPreview' => '' ) ) ) === true,
+    'E1S4 preview request: empty wpPreview counts (presence connotes truth)' );
 t_assert( HomebreweryWiki::isPreviewRequest(
         new HbwTestRequest( false, '', array( 'preview' => 'yes' ) ) ) === true,
     'E1S4 preview request: preview=yes recognised' );
