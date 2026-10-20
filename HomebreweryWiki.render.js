@@ -357,6 +357,7 @@
         var box = document.createElement( 'div' );
         box.innerHTML = clean;
         hardenTree( box );
+        box.innerHTML = restoreFencedMarkers( box.innerHTML );
         return box.innerHTML;
     }
 
@@ -410,6 +411,39 @@
     }
 
     /**
+     * Footnote fenced-code marker: an empty, content-free marker span never
+     * flows inside a code fence from our own pipeline, so a span-looking
+     * string inside `<pre><code>` is author text, not a marker.
+     *
+     * @type {RegExp}
+     */
+    var FENCED_MARKER = /<pre><code>((?:(?!<\/code>)[\s\S])*?)<\/code><\/pre>/g;
+
+    /**
+     * Strip marker spans that ended up inside fenced code (E3S3 review).
+     *
+     * `markFootnoteRefs` runs on the bare source, so it cannot know which
+     * `[^label]` sit inside a fence; the renderer then turns those spans
+     * into literal code text.  This pass restores the original reference
+     * text inside `<pre><code>` only, so code samples stay byte-identical
+     * while real references elsewhere keep linking.  `[^demo]` becomes the
+     * literal text again; the rest of the fence is untouched.
+     *
+     * @param {string} html rendered HTML
+     * @return {string} HTML with fence markers restored to source text
+     */
+    function restoreFencedMarkers( html ) {
+        return String( html ).replace( FENCED_MARKER, function ( whole, code ) {
+            return '<pre><code>' +
+                code.replace(
+                    /&lt;span class="hbw-footnote-mark" data-hbw-footnote="([^"&]+)"&gt;&lt;\/span&gt;/g,
+                    '[^$1]'
+                ) +
+                '</code></pre>';
+        } );
+    }
+
+    /**
      * Split rendered page HTML at the pinned renderer's columnSplit markers.
      *
      * @param {string} html sanitized page HTML
@@ -454,6 +488,9 @@
         var lines;
         var kept;
         var current;
+        var fenceChar;
+        var fenceLength;
+        var fence;
         var match;
         var p;
         var i;
@@ -462,19 +499,42 @@
             lines = String( pages[ p ] ).split( /\r\n|\r|\n/ );
             kept = [];
             current = null;
+            fenceChar = null;
+            fenceLength = 0;
             for ( i = 0; i < lines.length; i++ ) {
-                match = FOOTNOTE_DEF_LINE.exec( lines[ i ] );
-                if ( match ) {
-                    current = match[ 1 ];
-                    notes[ current ] = match[ 2 ];
-                    continue;
-                }
                 if ( current !== null &&
                     ( /^[ \t]+/.test( lines[ i ] ) || lines[ i ] === '' ) ) {
                     notes[ current ] += '\n' + lines[ i ];
                     continue;
                 }
                 current = null;
+
+                if ( fenceChar !== null ) {
+                    kept.push( lines[ i ] );
+                    fence = new RegExp(
+                        '^ {0,3}' + fenceChar + '{' + fenceLength + ',}[ \\t]*$'
+                    );
+                    if ( fence.test( lines[ i ] ) ) {
+                        fenceChar = null;
+                        fenceLength = 0;
+                    }
+                    continue;
+                }
+
+                fence = /^ {0,3}(`{3,}|~{3,})/.exec( lines[ i ] );
+                if ( fence ) {
+                    fenceChar = fence[ 1 ].charAt( 0 );
+                    fenceLength = fence[ 1 ].length;
+                    kept.push( lines[ i ] );
+                    continue;
+                }
+
+                match = FOOTNOTE_DEF_LINE.exec( lines[ i ] );
+                if ( match ) {
+                    current = match[ 1 ];
+                    notes[ current ] = match[ 2 ];
+                    continue;
+                }
                 kept.push( lines[ i ] );
             }
             cleaned.push( kept.join( '\n' ) );
@@ -490,7 +550,8 @@
      * state (variable definitions, heading ids) spans all of its columns; the
      * rendered columnSplit markers are then turned into column blocks.  The
      * `marked` fallback has no column support, so it renders each column from
-     * the source instead.
+     * the source instead.  Footnote markers that landed inside fenced code
+     * are restored to source text after sanitizing (E3S3 review).
      *
      * @param {Array.<string>} pages page sources
      * @param {Object.<string, string>} footnoteNotes footnote bodies by label
@@ -587,9 +648,13 @@
      * @param {string} pageSource page source with markers
      * @param {HTMLElement} pageNode rendered page block
      * @param {Object.<string, string>} notes footnote bodies by label
+     * @param {number} pageIndex zero-based page index; note and reference
+     *                          ids are scoped to the page so identical labels
+     *                          on different pages stay document-unique
      * @return {void}
      */
-    function linkFootnotes( pageSource, pageNode, notes ) {
+    function linkFootnotes( pageSource, pageNode, notes, pageIndex ) {
+        var pageNumber = pageIndex + 1;
         var order = [];
         var seen = {};
         var notesNode;
@@ -597,6 +662,7 @@
         var itemNode;
         var backLink;
         var refLink;
+        var refIdUsed = {};
         var markers;
         var marker;
         var label;
@@ -639,9 +705,13 @@
                 continue;
             }
             refLink = document.createElement( 'a' );
-            refLink.setAttribute( 'href', '#hbw-fn-' + encodeURIComponent( label ) );
-            if ( !pageNode.querySelector( '#hbw-fnref-' + encodeURIComponent( label ) ) ) {
-                refLink.setAttribute( 'id', 'hbw-fnref-' + encodeURIComponent( label ) );
+            refLink.setAttribute( 'href', '#hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
+            // No selector lookup: encoded labels can carry `.`, `(`, `)`
+            // and friends, which throw inside querySelector.  The first
+            // reference for a label on this page keeps the id.
+            if ( !Object.prototype.hasOwnProperty.call( refIdUsed, label ) ) {
+                refIdUsed[ label ] = true;
+                refLink.setAttribute( 'id', 'hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             }
             refLink.className = FOOTNOTE_REF_CLASS;
             refLink.appendChild( document.createTextNode( '[' + label + ']' ) );
@@ -662,11 +732,11 @@
         for ( i = 0; i < order.length; i++ ) {
             label = order[ i ];
             itemNode = document.createElement( 'li' );
-            itemNode.setAttribute( 'id', 'hbw-fn-' + encodeURIComponent( label ) );
+            itemNode.setAttribute( 'id', 'hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             itemNode.className = FOOTNOTE_ITEM_CLASS;
             itemNode.innerHTML = renderMarkdown( notes[ label ], 0 ) || '';
             backLink = document.createElement( 'a' );
-            backLink.setAttribute( 'href', '#hbw-fnref-' + encodeURIComponent( label ) );
+            backLink.setAttribute( 'href', '#hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             backLink.className = FOOTNOTE_BACK_CLASS;
             backLink.setAttribute( 'aria-label', 'Back to reference' );
             backLink.appendChild( document.createTextNode( '\u21A9' ) );
@@ -717,7 +787,7 @@
                 pageNode.appendChild( columnNode );
             }
 
-            linkFootnotes( pageSources[ p ], pageNode, notes );
+            linkFootnotes( pageSources[ p ], pageNode, notes, p );
 
             // Page footer: computed page number (E3S3T2).
             footerNode = document.createElement( 'div' );
