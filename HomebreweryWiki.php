@@ -30,8 +30,9 @@ define( 'HOMEBREWERYWIKI_VERSION', '0.3.0' );
  *
  * The vendored libraries are pinned and ES5-compatible (desktop floor, Q19):
  * marked 0.3.19 (MIT) and DOMPurify 2.5.8 (Apache-2.0 / MPL-2.0).  See
- * vendor/README.md.  Epic C replaces marked with the pinned Homebrewery
- * renderer bundle; Epic G owns the reproducible build.
+ * vendor/README.md.  E3 (Homebrewery rendering fidelity) replaces marked with
+ * the pinned Homebrewery renderer bundle; E7 (build, release & upgrades)
+ * owns the reproducible build.
  */
 define( 'HOMEBREWERYWIKI_MARKED_LIB', '/extensions/HomebreweryWiki/vendor/marked-0.3.19.min.js' );
 define( 'HOMEBREWERYWIKI_PURIFY_LIB', '/extensions/HomebreweryWiki/vendor/dompurify-2.5.8.min.js' );

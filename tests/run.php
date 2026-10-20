@@ -25,6 +25,13 @@ require_once( $mwRoot . '/commandLine.inc' );
 $pass = 0;
 $fail = 0;
 
+/**
+ * Record one assertion result.
+ *
+ * @param bool   $cond Condition that must hold.
+ * @param string $msg  Human-readable assertion label.
+ * @return void
+ */
 function t_assert( $cond, $msg ) {
     global $pass, $fail;
     if ( $cond ) {

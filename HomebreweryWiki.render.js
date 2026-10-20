@@ -12,10 +12,13 @@
  *   3. this file                     render + inject into the pane
  *
  * Sanitization baseline (DESIGN.md D7 / SECURITY-REVIEW.md F1-F3):
- *   - remove <script>, <iframe>, <object>, <embed>, <form>, <style>, ...
- *   - remove event-handler attributes and unknown protocols (DOMPurify)
- *   - remove CSS `url(...)`, `position: fixed`, `expression(...)` and
- *     `behavior` declarations (no outbound requests / overlay abuse)
+ *   - remove <script>, <iframe>, <object>, <embed>, <form>, <style>,
+ *     <audio>, <picture>, <source>, <video>, <track>, ...
+ *   - remove event-handler attributes, unknown protocols (DOMPurify), and
+ *     the poster/srcset attributes
+ *   - inline CSS is an allowlist: only safe properties with values that
+ *     contain no resource-loading function (url(, image-set(), ...), no CSS
+ *     escapes, and no position/overlay control
  *   - keep only same-origin images and inline `data:image/*` images (D2)
  *
  * On any failure the module falls back to the E1S2 plain <pre> so a reader
@@ -31,15 +34,138 @@
     var SANITIZE_CONFIG = {
         FORBID_TAGS: [
             'script', 'iframe', 'object', 'embed', 'form', 'input',
-            'button', 'textarea', 'select', 'style', 'link', 'meta', 'base'
+            'button', 'textarea', 'select', 'style', 'link', 'meta', 'base',
+            // Media elements can fetch from author-controlled URLs through
+            // src / srcset / poster; they are not needed for brew pages.
+            'audio', 'picture', 'source', 'video', 'track'
         ],
-        FORBID_ATTR: [ 'srcdoc', 'formaction' ],
+        FORBID_ATTR: [ 'srcdoc', 'formaction', 'poster', 'srcset' ],
         ALLOW_DATA_ATTR: false
     };
 
     /**
-     * Drop CSS declarations that can exfiltrate data or break the pane.
-     * MVP baseline (D7); a stricter policy is deferred to Epic J.
+     * Properties authors may set inline.  Anything else (position, top/left,
+     * z-index, cursor, filter, ...) is dropped, which also removes the whole
+     * `position: fixed` family rather than a single value pattern.
+     *
+     * @type {Object.<string, boolean>}
+     */
+    var ALLOWED_CSS_PROPERTIES = {
+        'color': true,
+        'background': true,
+        'background-color': true,
+        'background-image': true,
+        'font': true,
+        'font-family': true,
+        'font-size': true,
+        'font-style': true,
+        'font-weight': true,
+        'font-variant': true,
+        'font-stretch': true,
+        'line-height': true,
+        'letter-spacing': true,
+        'word-spacing': true,
+        'text-align': true,
+        'text-decoration': true,
+        'text-transform': true,
+        'text-indent': true,
+        'text-shadow': true,
+        'text-overflow': true,
+        'white-space': true,
+        'word-break': true,
+        'word-wrap': true,
+        'overflow-wrap': true,
+        'margin': true,
+        'margin-top': true,
+        'margin-right': true,
+        'margin-bottom': true,
+        'margin-left': true,
+        'padding': true,
+        'padding-top': true,
+        'padding-right': true,
+        'padding-bottom': true,
+        'padding-left': true,
+        'border': true,
+        'border-top': true,
+        'border-right': true,
+        'border-bottom': true,
+        'border-left': true,
+        'border-color': true,
+        'border-style': true,
+        'border-width': true,
+        'border-radius': true,
+        'border-collapse': true,
+        'border-spacing': true,
+        'width': true,
+        'height': true,
+        'max-width': true,
+        'max-height': true,
+        'min-width': true,
+        'min-height': true,
+        'display': true,
+        'float': true,
+        'clear': true,
+        'vertical-align': true,
+        'box-sizing': true,
+        'overflow': true,
+        'overflow-x': true,
+        'overflow-y': true,
+        'opacity': true,
+        'list-style': true,
+        'list-style-type': true,
+        'list-style-position': true,
+        'columns': true,
+        'column-count': true,
+        'column-gap': true,
+        'column-rule': true,
+        'break-inside': true,
+        'page-break-before': true,
+        'page-break-after': true,
+        'page-break-inside': true
+    };
+
+    /**
+     * CSS functions that carry no resource fetch and may appear in a value.
+     *
+     * @type {Object.<string, boolean>}
+     */
+    var ALLOWED_CSS_FUNCTIONS = {
+        'rgb': true,
+        'rgba': true,
+        'hsl': true,
+        'hsla': true,
+        'calc': true
+    };
+
+    /**
+     * Whether a CSS value is free of resource-loading tricks.
+     *
+     * `url(` is not enough: `image-set(`, `cross-fade(`, `element(` and
+     * friends also fetch, and a backslash can spell a function name with CSS
+     * escapes (`u\72l(`).  Only the safe colour/calc functions are allowed.
+     *
+     * @param {string} value CSS value portion
+     * @return {boolean}
+     */
+    function isSafeCssValue( value ) {
+        var lower = String( value ).toLowerCase();
+        if ( lower.indexOf( '\\' ) !== -1 ) {
+            return false;
+        }
+        var match;
+        var fn = /([a-z-]+)\s*\(/g;
+        while ( ( match = fn.exec( lower ) ) !== null ) {
+            if ( !ALLOWED_CSS_FUNCTIONS[ match[ 1 ] ] ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Reduce a style attribute to allowed properties with safe values.
+     * MVP baseline (D7); a stricter policy is deferred to post-MVP hardening
+     * (Epic J).
      *
      * @param {string} value style attribute value
      * @return {string} filtered declarations
@@ -50,17 +176,19 @@
         var i;
         for ( i = 0; i < parts.length; i++ ) {
             var decl = parts[ i ];
-            var lower = decl.toLowerCase();
-            if ( !decl || lower.indexOf( 'url(' ) !== -1 ) {
+            var colon = decl.indexOf( ':' );
+            if ( !decl || colon < 1 ) {
                 continue;
             }
-            if ( /position\s*:\s*fixed/.test( lower ) ) {
+            var prop = decl.substring( 0, colon ).replace( /^\s+|\s+$/g, '' ).toLowerCase();
+            var val = decl.substring( colon + 1 ).replace( /^\s+|\s+$/g, '' );
+            if ( !ALLOWED_CSS_PROPERTIES[ prop ] ) {
                 continue;
             }
-            if ( lower.indexOf( 'expression(' ) !== -1 || lower.indexOf( 'behavior' ) !== -1 ) {
+            if ( !isSafeCssValue( val ) ) {
                 continue;
             }
-            kept.push( decl );
+            kept.push( prop + ': ' + val );
         }
         return kept.join( ';' );
     }

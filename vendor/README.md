@@ -1,9 +1,9 @@
 # Vendored front-end libraries (E1S3)
 
 These files are pinned, unmodified upstream builds loaded by the extension on
-brew page views only. They are **not** rebuilt here; Epic G owns the
-reproducible build and Epic C replaces `marked` with the pinned Homebrewery
-renderer bundle.
+brew page views only. They are **not** rebuilt here; **E7** (build, release &
+upgrades) owns the reproducible build and **E3** (Homebrewery rendering
+fidelity) replaces `marked` with the pinned Homebrewery renderer bundle.
 
 | File | Upstream | Version | License | SHA-256 |
 |---|---|---|---|---|
@@ -16,7 +16,7 @@ renderer bundle.
   modules), matching the project's desktop browser floor (Q19) and the legacy
   MediaWiki 1.14 front end (no ResourceLoader / bundler).
 - `marked` 0.3.19 is the same legacy parser line Homebrewery keeps as
-  `markedLegacy`; Epic C swaps in the pinned Homebrewery renderer.
+  `markedLegacy`; E3 swaps in the pinned Homebrewery renderer.
 - `DOMPurify` 2.5.8 is the last 2.x line with ES5 output and supports the
   sanitization baseline in `docs/DESIGN.md` D7 / `docs/SECURITY-REVIEW.md`.
 
