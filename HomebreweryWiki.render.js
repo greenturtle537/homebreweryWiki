@@ -746,6 +746,7 @@
         var step;
         var refs;
         var text;
+        var ordinal = 0;
         var i;
 
         while ( ( step = walker.next() ) !== null ) {
@@ -756,10 +757,16 @@
             refs = findFootnoteRefs( step.text, notes );
             text = step.text;
             for ( i = refs.length - 1; i >= 0; i-- ) {
+                // The ordinal is the reference's position in the prose
+                // stream, carried into the rendered DOM so pairing still
+                // works when the renderer destroys a marker (an indented
+                // code line is escaped into <pre><code> text).
                 text = text.substring( 0, refs[ i ].index ) +
-                    '<span class="hbw-footnote-mark"></span>' +
+                    '<span class="hbw-footnote-mark hbw-fm-' +
+                    ( ordinal + i ) + '"></span>' +
                     text.substring( refs[ i ].index + refs[ i ].length );
             }
+            ordinal += refs.length;
             marked.push( text );
         }
 
@@ -835,6 +842,7 @@
         var labels;
         var marker;
         var label;
+        var ordinal;
         var i;
         var marked;
 
@@ -868,10 +876,21 @@
             }
         }( pageNode ) );
 
-        // Pair each marker with the prose reference that produced it.
+        // Pair each marker with the prose reference that produced it,
+        // by source ordinal rather than DOM position: a marker inside an
+        // indented code line is escaped into <pre><code> text, so
+        // positional pairing would hand every later marker the previous
+        // label.  A marker without a usable ordinal is skipped, never
+        // mis-linked (E3B1 follow-up).
         i = 0;
-        while ( i < markers.length && i < labels.length ) {
-            label = labels[ i ];
+        while ( i < markers.length ) {
+            marker = markers[ i ];
+            i++;
+            ordinal = /(?:^| )hbw-fm-(\d+)(?: |$)/.exec( marker.className );
+            if ( !ordinal || !labels.hasOwnProperty( ordinal[ 1 ] ) ) {
+                continue;
+            }
+            label = labels[ ordinal[ 1 ] ];
             refLink = document.createElement( 'a' );
             refLink.setAttribute( 'href', '#hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             // No selector lookup: encoded labels can carry `.`, `(`, `)`
@@ -883,8 +902,7 @@
             }
             refLink.className = FOOTNOTE_REF_CLASS;
             refLink.appendChild( document.createTextNode( '[' + label + ']' ) );
-            markers[ i ].parentNode.replaceChild( refLink, markers[ i ] );
-            i++;
+            marker.parentNode.replaceChild( refLink, marker );
         }
 
         if ( !order.length ) {

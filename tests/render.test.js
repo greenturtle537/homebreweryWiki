@@ -982,6 +982,31 @@ function makePage( source, options ) {
     ok( page.errors.length === 0, 'double backticks: no console errors' );
 }() );
 
+// --- E3B1 follow-up: a marker the renderer destroys must not shift pairing ---
+( function () {
+    var source = 'Prose cites one.[^one]\n\n'
+        + '    indented code cites two[^two]\n\n'
+        + 'Prose cites three.[^three]\n\n'
+        + '[^one]: note one.\n\n'
+        + '[^two]: note two.\n\n'
+        + '[^three]: note three.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+
+    // The renderer escapes the indented line's marker into <pre><code>
+    // text, so two links survive; ordinal pairing keeps three -> three
+    // instead of three -> two.
+    ok( refs.length === 2, 'destroyed marker: two references link' );
+    ok( refs.length === 2 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-one',
+        'destroyed marker: first link keeps its label' );
+    ok( refs.length === 2 && refs[ 1 ].getAttribute( 'href' ) === '#hbw-fn-1-three',
+        'destroyed marker: later link keeps its label, not the shifted one' );
+    ok( notes.length === 3, 'destroyed marker: all three notes are still listed' );
+    ok( page.errors.length === 0, 'destroyed marker: no console errors' );
+}() );
+
 // --- E3B1: a definition may contain inline code without losing its body ---
 ( function () {
     var source = 'Cites alpha.[^a]\n\n'
