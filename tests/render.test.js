@@ -293,6 +293,79 @@ function makePage( source, options ) {
     ok( previewPage.errors.length === 0, 'preview: no console errors' );
 }() );
 
+// --- E3S1 T1: \page / \column are recognised as split boundaries ---
+( function () {
+    var source = 'First page.\n\n'
+        + '\\page\n\n'
+        + 'Second page, left column.\n\n'
+        + '\\column\n\n'
+        + 'Second page, right column.\n';
+    var page = makePage( source );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( pages.length === 2, 'split: \\page starts a new page block' );
+    ok( pages.length === 2 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
+        'split: \\column starts a new column inside the page' );
+    ok( text.indexOf( '\\page' ) === -1, 'split: \\page marker text does not leak' );
+    ok( text.indexOf( '\\column' ) === -1, 'split: \\column marker text does not leak' );
+    ok( page.errors.length === 0, 'split: no console errors' );
+}() );
+
+// --- E3S1 T2: one page block per page, content stays in its own block ---
+( function () {
+    var source = '# One\n\nfirst\n\n\\page\n\n# Two\n\nsecond\n\n\\page\n\n# Three\n\nthird\n';
+    var page = makePage( source );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+
+    ok( pages.length === 3, 'pages: two markers produce three page blocks' );
+    ok( pages.length === 3 && pages[0].textContent.indexOf( 'first' ) !== -1 &&
+        pages[0].textContent.indexOf( 'second' ) === -1 &&
+        pages[0].textContent.indexOf( 'third' ) === -1,
+        'pages: first block holds only page-one content' );
+    ok( pages.length === 3 && pages[1].textContent.indexOf( 'second' ) !== -1 &&
+        pages[1].textContent.indexOf( 'first' ) === -1 &&
+        pages[1].textContent.indexOf( 'third' ) === -1,
+        'pages: second block holds only page-two content' );
+    ok( pages.length === 3 && pages[2].textContent.indexOf( 'third' ) !== -1 &&
+        pages[2].textContent.indexOf( 'first' ) === -1 &&
+        pages[2].textContent.indexOf( 'second' ) === -1,
+        'pages: third block holds only page-three content' );
+    ok( pages.length === 3 &&
+        pages[0].getAttribute( 'data-hbw-page' ) === '1' &&
+        pages[1].getAttribute( 'data-hbw-page' ) === '2' &&
+        pages[2].getAttribute( 'data-hbw-page' ) === '3',
+        'pages: blocks keep document order' );
+    ok( page.errors.length === 0, 'pages: no console errors' );
+}() );
+
+// --- E3S1 T3: the three-page reference brew renders as three blocks ---
+( function () {
+    var fixture = fs.readFileSync(
+        path.join( __dirname, 'fixtures', 'three-page-brew.md' ), 'utf8'
+    );
+    var page = makePage( fixture );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var headings = [];
+
+    if ( pages.length === 3 ) {
+        headings.push( pages[0].querySelector( 'h1' ) ? pages[0].querySelector( 'h1' ).textContent : '' );
+        headings.push( pages[1].querySelector( 'h1' ) ? pages[1].querySelector( 'h1' ).textContent : '' );
+        headings.push( pages[2].querySelector( 'h1' ) ? pages[2].querySelector( 'h1' ).textContent : '' );
+    }
+
+    ok( pages.length === 3, 'reference brew: three page blocks appear' );
+    ok( pages.length === 3 && headings[0] === 'The Three-Page Reference Brew' &&
+        headings[1] === 'Page Two' && headings[2] === 'Page Three',
+        'reference brew: page blocks appear in document order' );
+    ok( pages.length === 3 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
+        'reference brew: \\column is preserved inside its page' );
+    ok( page.errors.length === 0, 'reference brew: no console errors' );
+}() );
+
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );

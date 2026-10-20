@@ -32,6 +32,20 @@
     var SOURCE_ID = 'hbw-source';
     var RENDERED_ID = 'hbw-brew-rendered';
     var RENDERED_CLASS = 'hbw-brew-rendered';
+    var PAGE_CLASS = 'hbw-page';
+    var COLUMN_CLASS = 'hbw-column';
+
+    /**
+     * A Homebrewery split marker on a line of its own (Q18 / E3S1).
+     *
+     * `\page` starts a new page block, `\column` starts a new column inside
+     * the current page.  Optional attributes after the token (Homebrewery
+     * allows e.g. `\page [landscape]`) are consumed with the marker, so no
+     * marker text can reach the rendered content.
+     *
+     * @type {RegExp}
+     */
+    var SPLIT_MARKER = /^[ \t]*\\(page|column)(?:[ \t].*)?$/;
 
     var SANITIZE_CONFIG = {
         FORBID_TAGS: [
@@ -288,6 +302,118 @@
     }
 
     /**
+     * Split brew source into Homebrewery page/column segments (E3S1).
+     *
+     * A page is an array of column sources; the result is an array of pages in
+     * document order.  Marker lines are removed, so the returned text is ready
+     * to render.  A brew without markers yields exactly one page with one
+     * column, which keeps the "one page block per brew page" contract uniform.
+     *
+     * @param {string} text raw brew source
+     * @return {Array.<Array.<string>>} pages -> columns -> source
+     */
+    function splitBrew( text ) {
+        var lines = String( text ).split( /\r\n|\r|\n/ );
+        var pages = [];
+        var columns = [];
+        var current = [];
+        var marker;
+        var i;
+
+        for ( i = 0; i < lines.length; i++ ) {
+            marker = SPLIT_MARKER.exec( lines[ i ] );
+            if ( !marker ) {
+                current.push( lines[ i ] );
+                continue;
+            }
+
+            columns.push( current.join( '\n' ) );
+            current = [];
+
+            if ( marker[ 1 ] === 'page' ) {
+                pages.push( columns );
+                columns = [];
+            }
+        }
+
+        columns.push( current.join( '\n' ) );
+        pages.push( columns );
+
+        return pages;
+    }
+
+    /**
+     * Render every column, returning pages of sanitized HTML.  Returns null
+     * when the renderer bundle is unavailable for any segment, so the caller
+     * can fall back to the plain-text view for the whole brew.
+     *
+     * @param {Array.<Array.<string>>} pages pages -> columns -> source
+     * @return {Array.<Array.<string>>|null} pages -> columns -> HTML
+     */
+    function renderPages( pages ) {
+        var renderedPages = [];
+        var renderedColumns;
+        var html;
+        var page;
+        var column;
+        var p;
+        var c;
+
+        for ( p = 0; p < pages.length; p++ ) {
+            page = pages[ p ];
+            renderedColumns = [];
+            for ( c = 0; c < page.length; c++ ) {
+                column = page[ c ];
+                html = renderMarkdown( column );
+                if ( html === null ) {
+                    return null;
+                }
+                renderedColumns.push( html );
+            }
+            renderedPages.push( renderedColumns );
+        }
+
+        return renderedPages;
+    }
+
+    /**
+     * Build the rendered container with one page block per brew page (E3S1).
+     * Each page block holds one column block per `\column` segment, in
+     * document order.
+     *
+     * @param {Array.<Array.<string>>} renderedPages pages -> columns -> HTML
+     * @return {HTMLElement}
+     */
+    function buildRendered( renderedPages ) {
+        var container = document.createElement( 'div' );
+        var pageNode;
+        var columnNode;
+        var p;
+        var c;
+
+        container.className = RENDERED_CLASS;
+        container.id = RENDERED_ID;
+        container.setAttribute( 'data-hbw-render', 'html' );
+
+        for ( p = 0; p < renderedPages.length; p++ ) {
+            pageNode = document.createElement( 'div' );
+            pageNode.className = PAGE_CLASS;
+            pageNode.setAttribute( 'data-hbw-page', String( p + 1 ) );
+
+            for ( c = 0; c < renderedPages[ p ].length; c++ ) {
+                columnNode = document.createElement( 'div' );
+                columnNode.className = COLUMN_CLASS;
+                columnNode.innerHTML = renderedPages[ p ][ c ];
+                pageNode.appendChild( columnNode );
+            }
+
+            container.appendChild( pageNode );
+        }
+
+        return container;
+    }
+
+    /**
      * Build the visible pane content from the hidden source placeholder.
      */
     function renderBrew() {
@@ -303,21 +429,17 @@
         }
 
         var text = source.textContent || source.innerText || '';
-        var html = null;
+        var renderedPages = null;
         var rendered = null;
 
         try {
-            html = renderMarkdown( text );
+            renderedPages = renderPages( splitBrew( text ) );
         } catch ( e ) {
-            html = null;
+            renderedPages = null;
         }
 
-        if ( html !== null ) {
-            rendered = document.createElement( 'div' );
-            rendered.className = RENDERED_CLASS;
-            rendered.id = RENDERED_ID;
-            rendered.innerHTML = html;
-            rendered.setAttribute( 'data-hbw-render', 'html' );
+        if ( renderedPages !== null ) {
+            rendered = buildRendered( renderedPages );
             host.appendChild( rendered );
         } else {
             // Degraded path: never hide the reader's content because the
