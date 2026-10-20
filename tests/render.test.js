@@ -24,6 +24,13 @@ var renderSource = fs.readFileSync( path.join( root, 'HomebreweryWiki.render.js'
 var pass = 0;
 var fail = 0;
 
+/**
+ * Record one assertion result.
+ *
+ * @param {boolean} cond Condition that must hold.
+ * @param {string} msg  Human-readable assertion label.
+ * @return {void}
+ */
 function ok( cond, msg ) {
     if ( cond ) {
         pass++;
@@ -34,6 +41,12 @@ function ok( cond, msg ) {
     }
 }
 
+/**
+ * Escape text for the hidden-server-placeholder fixture.
+ *
+ * @param {string} value Raw text.
+ * @return {string} HTML-escaped text.
+ */
 function escapeHtml( value ) {
     return String( value )
         .replace( /&/g, '&amp;' )
@@ -43,6 +56,14 @@ function escapeHtml( value ) {
         .replace( /'/g, '&#39;' );
 }
 
+/**
+ * Build a jsdom page with the real placeholder markup and run the real
+ * renderer assets inside it.
+ *
+ * @param {string|null} source  Brew source, or null for a non-brew page.
+ * @param {Object}      options `{ withLibs: false }` omits marked/DOMPurify.
+ * @return {{dom: JSDOM, win: Window, errors: Array}} Test fixture.
+ */
 function makePage( source, options ) {
     options = options || {};
     var consoleErrors = [];
@@ -115,12 +136,14 @@ function makePage( source, options ) {
         + '# Safe\n\n'
         + '<img src="x" onerror="window.__pwned = \'img\';">\n\n'
         + '<iframe src="https://evil.example/"></iframe>\n\n'
-        + '<div style="background:url(https://evil.example/x.png); position: fixed; color: red">styled</div>\n';
+        + '<div style="background:url(https://evil.example/x.png); position: fixed; color: red">styled</div>\n\n'
+        + '<div style="background-image: image-set(\'https://evil.example/track\' 1x); color: blue">image-set</div>\n';
     var page = makePage( source );
     var doc = page.win.document;
     var rendered = doc.getElementById( 'hbw-brew-rendered' );
-    var styled = rendered && rendered.querySelector( 'div[style]' );
-    var style = styled ? styled.getAttribute( 'style' ) : '';
+    var divs = rendered ? rendered.querySelectorAll( 'div[style]' ) : [];
+    var style = divs.length ? divs[0].getAttribute( 'style' ) : '';
+    var imageSetStyle = divs.length > 1 ? divs[1].getAttribute( 'style' ) : '';
 
     ok( !!rendered, 'sanitize: content rendered' );
     ok( !!rendered && !rendered.querySelector( 'script' ), 'sanitize: script removed' );
@@ -130,7 +153,52 @@ function makePage( source, options ) {
     ok( style.indexOf( 'color: red' ) !== -1, 'sanitize: safe inline CSS kept' );
     ok( style.toLowerCase().indexOf( 'url(' ) === -1, 'sanitize: css url() removed' );
     ok( style.toLowerCase().indexOf( 'position' ) === -1, 'sanitize: position:fixed removed' );
+    ok( imageSetStyle.indexOf( 'color: blue' ) !== -1, 'sanitize: safe colour kept beside image-set' );
+    ok( imageSetStyle.toLowerCase().indexOf( 'image-set' ) === -1,
+        'sanitize: image-set() removed' );
     ok( page.errors.length === 0, 'sanitize: no console errors' );
+}() );
+
+// --- Media elements and resource attributes are forbidden ---
+( function () {
+    var source = '<video poster="https://evil.example/p.png">'
+        + '<source src="https://evil.example/v.mp4"></video>\n\n'
+        + '<audio src="https://evil.example/a.mp3"></audio>\n\n'
+        + '<picture><source srcset="https://evil.example/p2.png 2x"></picture>\n\n'
+        + '<img src="/images/ok.png" srcset="https://evil.example/x.png 2x" alt="ok">\n';
+    var page = makePage( source );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var img = rendered ? rendered.querySelector( 'img' ) : null;
+
+    ok( !!rendered, 'media: content rendered' );
+    ok( !!rendered && !rendered.querySelector( 'video' ), 'media: video removed' );
+    ok( !!rendered && !rendered.querySelector( 'audio' ), 'media: audio removed' );
+    ok( !!rendered && !rendered.querySelector( 'source' ), 'media: source removed' );
+    ok( !!rendered && !rendered.querySelector( 'picture' ), 'media: picture removed' );
+    ok( !!rendered && !/poster/i.test( rendered.innerHTML ), 'media: poster removed' );
+    ok( !!rendered && !/srcset/i.test( rendered.innerHTML ), 'media: srcset removed' );
+    ok( !!img && img.getAttribute( 'src' ) === '/images/ok.png',
+        'media: legitimate img src kept' );
+    ok( page.errors.length === 0, 'media: no console errors' );
+}() );
+
+// --- SVG and the legacy background attribute cannot fetch either ---
+( function () {
+    var source = '<svg><image href="https://evil.example/x.svg"></image>'
+        + '<feImage href="https://evil.example/y.svg"></feImage></svg>\n\n'
+        + '<table background="https://evil.example/bg.png"><tr><td>cell</td></tr></table>\n';
+    var page = makePage( source );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var table = rendered ? rendered.querySelector( 'table' ) : null;
+
+    ok( !!rendered, 'svg: content rendered' );
+    ok( !!rendered && !rendered.querySelector( 'svg' ), 'svg: svg element removed' );
+    ok( !!rendered && !/evil\.example/.test( rendered.innerHTML ),
+        'svg: external svg refs removed' );
+    ok( !!table, 'svg: table content kept' );
+    ok( !!table && !table.getAttribute( 'background' ),
+        'svg: legacy background attribute removed' );
+    ok( page.errors.length === 0, 'svg: no console errors' );
 }() );
 
 // --- D2/F3: only same-origin (or inline data) images survive ---
