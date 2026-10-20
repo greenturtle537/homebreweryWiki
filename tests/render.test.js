@@ -165,16 +165,77 @@ function makePage( source, options ) {
     return { dom: dom, win: win, errors: consoleErrors };
 }
 
+/**
+ * The parent-side host element for a rendered brew.
+ *
+ * @param {Object} page Test fixture from makePage().
+ * @return {HTMLElement|null} `.hbw-brew` host, if any.
+ */
+function hostOf( page ) {
+    return page.win.document.getElementById( 'hbw-brew' );
+}
+
+/**
+ * The same-origin render iframe appended to the host.
+ *
+ * @param {Object} page Test fixture from makePage().
+ * @return {HTMLIFrameElement|null} Render frame, if any.
+ */
+function frameOf( page ) {
+    var host = hostOf( page );
+    return host ? host.querySelector( 'iframe' ) : null;
+}
+
+/**
+ * The render iframe's document (the module's visible DOM lives here).
+ *
+ * @param {Object} page Test fixture from makePage().
+ * @return {Document|null} Frame document, if available.
+ */
+function frameDocOf( page ) {
+    var frame = frameOf( page );
+    try {
+        return frame && frame.contentDocument;
+    } catch ( e ) {
+        return null;
+    }
+}
+
+/**
+ * Root of the sanitized page DOM inside the iframe.
+ *
+ * @param {Object} page Test fixture from makePage().
+ * @return {HTMLElement|null} `.brewRenderer` root, or null on fallback.
+ */
+function renderRoot( page ) {
+    var doc = frameDocOf( page );
+    return doc ? doc.querySelector( '.brewRenderer' ) : null;
+}
+
 // --- T3: headings and paragraphs become real HTML elements ---
 ( function () {
     var page = makePage( '# Brew Title\n\nA paragraph with **bold** text.\n' );
     var doc = page.win.document;
-    var rendered = doc.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
+    var host = hostOf( page );
+    var frame = frameOf( page );
+    var sandbox = frame ? frame.getAttribute( 'sandbox' ) : '';
 
     ok( doc.getElementById( 'hbw-source' ) === null, 'render: hidden source is removed' );
-    ok( !!rendered, 'render: rendered container is created' );
-    ok( !!rendered && rendered.getAttribute( 'data-hbw-render' ) === 'html',
+    ok( !!rendered, 'render: sanitized pages exist inside the iframe' );
+    ok( !!host && host.getAttribute( 'data-hbw-render' ) === 'html',
         'render: html path is reported' );
+    ok( !!host && host.getAttribute( 'data-hbw-pages' ) === '1',
+        'render: page count is reported' );
+    ok( !!frame && sandbox.indexOf( 'allow-same-origin' ) !== -1 &&
+        sandbox.indexOf( 'allow-top-navigation-by-user-activation' ) !== -1,
+        'render: iframe host is same-origin and top-navigation-safe' );
+    ok( sandbox.indexOf( 'allow-scripts' ) === -1,
+        'render: iframe host does not allow scripts' );
+    ok( !!frame && frame.getAttribute( 'referrerpolicy' ) === 'no-referrer',
+        'render: iframe host sends no referrer' );
+    ok( !!frame && frame.getAttribute( 'scrolling' ) === 'no',
+        'render: iframe host does not scroll itself' );
     ok( !!rendered && !!rendered.querySelector( 'h1' ),
         'render: markdown heading becomes an h1' );
     ok( !!rendered && rendered.querySelector( 'h1' ).textContent === 'Brew Title',
@@ -198,7 +259,7 @@ function makePage( source, options ) {
         + '<div style="background-image: image-set(\'https://evil.example/track\' 1x); color: blue">image-set</div>\n';
     var page = makePage( source );
     var doc = page.win.document;
-    var rendered = doc.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var divs = rendered ? rendered.querySelectorAll( 'div[style]' ) : [];
     var style = divs.length ? divs[0].getAttribute( 'style' ) : '';
     var imageSetStyle = divs.length > 1 ? divs[1].getAttribute( 'style' ) : '';
@@ -225,7 +286,7 @@ function makePage( source, options ) {
         + '<picture><source srcset="https://evil.example/p2.png 2x"></picture>\n\n'
         + '<img src="/images/ok.png" srcset="https://evil.example/x.png 2x" alt="ok">\n';
     var page = makePage( source );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var img = rendered ? rendered.querySelector( 'img' ) : null;
 
     ok( !!rendered, 'media: content rendered' );
@@ -246,7 +307,7 @@ function makePage( source, options ) {
         + '<feImage href="https://evil.example/y.svg"></feImage></svg>\n\n'
         + '<table background="https://evil.example/bg.png"><tr><td>cell</td></tr></table>\n';
     var page = makePage( source );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var table = rendered ? rendered.querySelector( 'table' ) : null;
 
     ok( !!rendered, 'svg: content rendered' );
@@ -264,7 +325,7 @@ function makePage( source, options ) {
     var page = makePage( '![evil](https://evil.example/x.png)\n\n'
         + '![good](/images/x.png)\n\n'
         + '![inline](data:image/png;base64,AAAA)\n' );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var imgs = rendered ? rendered.querySelectorAll( 'img' ) : [];
 
     ok( imgs.length === 3, 'images: three img elements rendered' );
@@ -295,7 +356,7 @@ function makePage( source, options ) {
         + '<div style="background: u\\72l(https://evil.example/x.png); color: green">escaped</div>\n\n'
         + '<div style="width: expression(alert(1)); color: purple">expression</div>\n';
     var page = makePage( source );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var html = rendered ? rendered.innerHTML : '';
     var divs = rendered ? rendered.querySelectorAll( 'div[style]' ) : [];
     var escapedStyle = divs.length ? divs[0].getAttribute( 'style' ) : '';
@@ -392,7 +453,7 @@ function offOriginFetches( win, root ) {
         withHomebrewery: true,
         resourceLog: requests
     } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var offOrigin = rendered ? offOriginFetches( page.win, rendered ) : [ 'no render' ];
 
     ok( !!rendered, 'attack brew: content rendered' );
@@ -403,7 +464,7 @@ function offOriginFetches( win, root ) {
         'attack brew: no outbound request (' + requests.join( ', ' ) + ')' );
     ok( offOrigin.length === 0,
         'attack brew: no fetch-capable off-origin attribute (' + offOrigin.join( ', ' ) + ')' );
-    ok( !!rendered && rendered.querySelectorAll( '.hbw-page' ).length >= 3,
+    ok( !!rendered && rendered.querySelectorAll( '.page' ).length >= 3,
         'attack brew: all pages still render' );
     ok( !!rendered && !!rendered.querySelector( 'h1' ) &&
         rendered.querySelector( 'h1' ).textContent === 'Attack Brew',
@@ -429,7 +490,7 @@ function offOriginFetches( win, root ) {
         source = fs.readFileSync( path.join( __dirname, 'fixtures', demos[ d ] ), 'utf8' );
         requests = [];
         page = makePage( source, { withHomebrewery: true, resourceLog: requests } );
-        rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+        rendered = renderRoot( page );
         offOrigin = rendered ? offOriginFetches( page.win, rendered ) : [ 'no render' ];
 
         ok( requests.length === 0 && offOrigin.length === 0,
@@ -449,6 +510,10 @@ function offOriginFetches( win, root ) {
     ok( !!fallback, 'fallback: preformatted element created' );
     ok( !!fallback && fallback.getAttribute( 'data-hbw-render' ) === 'fallback',
         'fallback: degraded path is reported' );
+    ok( !!hostOf( page ) &&
+        hostOf( page ).getAttribute( 'data-hbw-render' ) === 'fallback',
+        'fallback: host reports the degraded path' );
+    ok( frameOf( page ) === null, 'fallback: no iframe left behind' );
     ok( !!fallback && fallback.textContent === source,
         'fallback: source text is byte-identical' );
     ok( page.errors.length === 0, 'fallback: no console errors' );
@@ -459,7 +524,7 @@ function offOriginFetches( win, root ) {
     var page = makePage( null );
     var doc = page.win.document;
 
-    ok( doc.getElementById( 'hbw-brew-rendered' ) === null, 'non-brew: no render container' );
+    ok( hostOf( page ) === null, 'non-brew: no render container' );
     ok( doc.getElementById( 'hbw-source' ) === null, 'non-brew: source untouched/absent' );
     ok( doc.body.textContent.indexOf( 'Main page' ) !== -1, 'non-brew: content untouched' );
     ok( page.errors.length === 0, 'non-brew: no console errors' );
@@ -470,21 +535,23 @@ function offOriginFetches( win, root ) {
     var source = '# Brew Title\n\nA paragraph with **bold** text.\n';
     var viewPage = makePage( source );
     var previewPage = makePage( source, { preview: true } );
-    var viewRendered = viewPage.win.document.getElementById( 'hbw-brew-rendered' );
-    var previewRendered = previewPage.win.document.getElementById( 'hbw-brew-rendered' );
+    var viewRendered = renderRoot( viewPage );
+    var previewRendered = renderRoot( previewPage );
     var previewArea = previewPage.win.document.getElementById( 'wikiPreview' );
 
     ok( !!previewRendered, 'preview: rendered container created' );
-    ok( !!previewArea && !!previewRendered && previewArea.contains( previewRendered ),
+    ok( !!previewArea && !!previewRendered && previewArea.contains( hostOf( previewPage ) ),
         'preview: rendered inside #wikiPreview' );
-    ok( !!previewRendered && !!previewRendered.parentNode &&
-        previewRendered.parentNode.id === 'hbw-brew',
+    ok( !!hostOf( previewPage ) &&
+        hostOf( previewPage ).parentNode.id === 'wikiPreview',
         'preview: same .hbw-brew wrapper as the saved view' );
+    ok( !!frameDocOf( previewPage ), 'preview: same iframe host as the saved view' );
     ok( previewPage.win.document.getElementById( 'hbw-source' ) === null,
         'preview: hidden source removed' );
     ok( !!previewRendered && !!previewRendered.querySelector( 'h1' ),
         'preview: markdown heading rendered' );
-    ok( !!previewRendered && previewRendered.getAttribute( 'data-hbw-render' ) === 'html',
+    ok( !!hostOf( previewPage ) &&
+        hostOf( previewPage ).getAttribute( 'data-hbw-render' ) === 'html',
         'preview: html path is reported' );
     ok( !!viewRendered && !!previewRendered &&
         previewRendered.innerHTML === viewRendered.innerHTML,
@@ -505,13 +572,17 @@ function offOriginFetches( win, root ) {
         + '\\column\n\n'
         + 'Second page, right column.\n';
     var page = makePage( source );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var rendered = renderRoot( page );
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
     var text = rendered ? rendered.textContent : '';
 
     ok( pages.length === 2, 'split: \\page starts a new page block' );
-    ok( pages.length === 2 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
-        'split: \\column starts a new column inside the page' );
+    ok( pages.length === 2 &&
+        !!pages[1].querySelector( '.columnWrapper .columnSplit' ) &&
+        pages[1].querySelectorAll( '.columnWrapper' ).length === 1,
+        'split: \\column starts a new upstream column inside the page' );
+    ok( pages.length === 2 && !pages[1].querySelector( '.hbw-column' ),
+        'split: no legacy .hbw-column blocks are created' );
     ok( text.indexOf( '\\page' ) === -1, 'split: \\page marker text does not leak' );
     ok( text.indexOf( '\\column' ) === -1, 'split: \\column marker text does not leak' );
     ok( page.errors.length === 0, 'split: no console errors' );
@@ -521,8 +592,8 @@ function offOriginFetches( win, root ) {
 ( function () {
     var source = '# One\n\nfirst\n\n\\page\n\n# Two\n\nsecond\n\n\\page\n\n# Three\n\nthird\n';
     var page = makePage( source );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var rendered = renderRoot( page );
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
 
     ok( pages.length === 3, 'pages: two markers produce three page blocks' );
     ok( pages.length === 3 && pages[0].textContent.indexOf( 'first' ) !== -1 &&
@@ -538,9 +609,9 @@ function offOriginFetches( win, root ) {
         pages[2].textContent.indexOf( 'second' ) === -1,
         'pages: third block holds only page-three content' );
     ok( pages.length === 3 &&
-        pages[0].getAttribute( 'data-hbw-page' ) === '1' &&
-        pages[1].getAttribute( 'data-hbw-page' ) === '2' &&
-        pages[2].getAttribute( 'data-hbw-page' ) === '3',
+        pages[0].getAttribute( 'data-index' ) === '0' &&
+        pages[1].getAttribute( 'data-index' ) === '1' &&
+        pages[2].getAttribute( 'data-index' ) === '2',
         'pages: blocks keep document order' );
     ok( page.errors.length === 0, 'pages: no console errors' );
 }() );
@@ -551,9 +622,14 @@ function offOriginFetches( win, root ) {
         path.join( __dirname, 'fixtures', 'three-page-brew.md' ), 'utf8'
     );
     var page = makePage( fixture );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var rendered = renderRoot( page );
+    var frameDoc = frameDocOf( page );
+    var pagesRoot = frameDoc ? frameDoc.querySelector( '.pages' ) : null;
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
     var headings = [];
+
+    ok( !!pagesRoot && pagesRoot.querySelectorAll( '.page' ).length === 3,
+        'reference brew: iframe .pages holds three .page blocks' );
 
     if ( pages.length === 3 ) {
         headings.push( pages[0].querySelector( 'h1' ) ? pages[0].querySelector( 'h1' ).textContent : '' );
@@ -565,8 +641,12 @@ function offOriginFetches( win, root ) {
     ok( pages.length === 3 && headings[0] === 'The Three-Page Reference Brew' &&
         headings[1] === 'Page Two' && headings[2] === 'Page Three',
         'reference brew: page blocks appear in document order' );
-    ok( pages.length === 3 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
-        'reference brew: \\column is preserved inside its page' );
+    ok( pages.length === 3 && pages[1].querySelectorAll( '.columnSplit' ).length === 1 &&
+        pages[1].querySelectorAll( '.columnWrapper' ).length === 1,
+        'reference brew: \\column is preserved as an upstream column split' );
+    ok( pages.length === 3 && !rendered.querySelector( '.hbw-page' ) &&
+        !rendered.querySelector( '.hbw-column' ),
+        'reference brew: no legacy .hbw-page/.hbw-column blocks remain' );
     ok( page.errors.length === 0, 'reference brew: no console errors' );
 }() );
 
@@ -574,12 +654,12 @@ function offOriginFetches( win, root ) {
 ( function () {
     var source = '# Brew Title\n\nA paragraph with **bold** text.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var heading = rendered ? rendered.querySelector( 'h1' ) : null;
 
     ok( typeof page.win.HomebreweryRenderer === 'object',
         'pinned: bundle defines HomebreweryRenderer' );
-    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
         'pinned: container reports the pinned renderer' );
     ok( !!rendered && !!heading, 'pinned: markdown heading rendered' );
     ok( !!heading && heading.textContent === 'Brew Title', 'pinned: heading text preserved' );
@@ -597,9 +677,9 @@ function offOriginFetches( win, root ) {
         + '<img src="x" onerror="window.__pwnedPin = \'img\';">\n\n'
         + '<iframe src="https://evil.example/"></iframe>\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
 
-    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
         'pinned sanitize: pinned renderer is in use' );
     ok( !!rendered && !rendered.querySelector( 'script' ),
         'pinned sanitize: script removed' );
@@ -618,13 +698,13 @@ function offOriginFetches( win, root ) {
     var source = 'One\n\n\\pagebreak\n\nTwo\n\n\\columnbreak\n\nThree\n\n'
         + '\\page {landscape}\n\nFour\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var rendered = renderRoot( page );
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
     var text = rendered ? rendered.textContent : '';
 
     ok( pages.length === 3, 'aliases: \\pagebreak and \\page both split pages' );
-    ok( pages.length === 3 && pages[1].querySelectorAll( '.hbw-column' ).length === 2,
-        'aliases: \\columnbreak starts a new column' );
+    ok( pages.length === 3 && pages[1].querySelectorAll( '.columnSplit' ).length === 1,
+        'aliases: \\columnbreak emits the upstream column split' );
     ok( text.indexOf( 'pagebreak' ) === -1 && text.indexOf( 'columnbreak' ) === -1 &&
         text.indexOf( 'landscape' ) === -1,
         'aliases: marker text and attributes do not leak' );
@@ -636,10 +716,10 @@ function offOriginFetches( win, root ) {
     var source = '# Still Here\n\nbody text\n';
     var page = makePage( source, { withHomebrewery: true, pinnedThrows: true } );
     var doc = page.win.document;
-    var rendered = doc.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
 
     ok( !!rendered, 'pinned throw: content still rendered' );
-    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
         'pinned throw: marked fallback is reported' );
     ok( !!rendered && !!rendered.querySelector( 'h1' ),
         'pinned throw: fallback produced the heading' );
@@ -650,24 +730,24 @@ function offOriginFetches( win, root ) {
 ( function () {
     var source = '[str]: 18\n\n# Stats\n\nSTR $[str]\n\n\\columnbreak\n\nAgain $[str]\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
-    var columns = pages.length ? pages[0].querySelectorAll( '.hbw-column' ) : [];
+    var rendered = renderRoot( page );
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
+    var wrapper = pages.length ? pages[0].querySelector( '.columnWrapper' ) : null;
+    var split = wrapper ? wrapper.querySelector( '.columnSplit' ) : null;
+    var text = pages.length ? pages[0].textContent : '';
 
-    ok( columns.length === 2, 'page state: column break made two columns' );
-    ok( columns.length === 2 && columns[0].textContent.indexOf( '18' ) !== -1,
-        'page state: first column resolves the variable' );
-    ok( columns.length === 2 && columns[1].textContent.indexOf( '18' ) !== -1,
-        'page state: second column still resolves the variable' );
+    ok( !!wrapper && !!split, 'page state: column break emits one upstream split' );
+    ok( text.split( '18' ).length - 1 === 2,
+        'page state: both columns resolve the variable' );
     ok( page.errors.length === 0, 'page state: no console errors' );
 }() );
 
 // --- Degraded path still reports the fallback renderer when the bundle is absent ---
 ( function () {
     var page = makePage( '# Title\n\nbody\n' );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
 
-    ok( !!rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
         'fallback renderer: marked path is reported' );
     ok( page.errors.length === 0, 'fallback renderer: no console errors' );
 }() );
@@ -755,6 +835,8 @@ function offOriginFetches( win, root ) {
     ok( unscoped.length === 0,
         'theme: every selector is scoped under .hbw-brew (' + unscoped.join( ' | ' ) + ')' );
     ok( selectors.length > 0, 'theme: stylesheet has rules' );
+    ok( themeSource.indexOf( '.hbw-brew .hbw-frame' ) !== -1,
+        'theme: parent stylesheet sizes the iframe host' );
     ok( !/#hbw-/.test( themeSource ), 'theme: scoping uses the wrapper class, not ids' );
 }() );
 
@@ -764,8 +846,8 @@ function offOriginFetches( win, root ) {
         + '<div class="note">\n\nA **note** body.\n\n</div>\n\n'
         + '| a | b |\n|---|---|\n| 1 | 2 |\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var column = rendered ? rendered.querySelector( '.hbw-page .hbw-column' ) : null;
+    var rendered = renderRoot( page );
+    var column = rendered ? rendered.querySelector( '.page > .columnWrapper' ) : null;
     var raw = page.win.HomebreweryRenderer.render( source, 0 );
     var box = page.win.document.createElement( 'div' );
 
@@ -827,12 +909,13 @@ function offOriginFetches( win, root ) {
     for ( i = 0; i < cases.length; i++ ) {
         ( function ( spec ) {
             var page = makePage( spec.source, { withHomebrewery: true } );
-            var doc = page.win.document;
-            var rendered = doc.getElementById( 'hbw-brew-rendered' );
+            var frameDoc = frameDocOf( page );
+            var view = frameDoc && frameDoc.defaultView;
+            var rendered = renderRoot( page );
             var styled = rendered ? rendered.querySelector( 'div[style]' ) : null;
             var value = '';
-            if ( styled && page.win.getComputedStyle ) {
-                value = page.win.getComputedStyle( styled ).getPropertyValue( spec.prop );
+            if ( styled && view && view.getComputedStyle ) {
+                value = view.getComputedStyle( styled ).getPropertyValue( spec.prop );
             }
             ok( !!rendered, 'theme values: ' + spec.needle + ' rendered' );
             ok( !!styled && styled.textContent !== '',
@@ -902,7 +985,8 @@ function offOriginFetches( win, root ) {
     // content, so adjacent-selector escapes (`.hbw-brew + .note`) would fire.
     var mixed = new JSDOM(
         '<!doctype html><html><body>'
-        + '<div class="hbw-brew"><div class="hbw-page"><div class="hbw-column">'
+        + '<div class="hbw-brew"><iframe class="hbw-frame"></iframe>' +
+        '<div class="page"><div class="columnWrapper">'
         + '<p>Brew content</p>'
         + '</div></div></div>'
         + '<div class="note">page content after the brew</div>'
@@ -953,13 +1037,13 @@ function offOriginFetches( win, root ) {
     var source = '# Tables\n\n'
         + '| Roll | Result |\n|------|--------|\n| 1-5  | Nothing |\n| 6    | Something |\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var table = rendered ? rendered.querySelector( 'table' ) : null;
     var headers = table ? table.querySelectorAll( 'th' ) : [];
     var cells = table ? table.querySelectorAll( 'td' ) : [];
     var text = rendered ? rendered.textContent : '';
 
-    ok( rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
+    ok( rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
         'tables: pinned renderer is in use' );
     ok( !!table, 'tables: table element emitted' );
     ok( headers.length === 2 && headers[0].textContent === 'Roll' &&
@@ -975,22 +1059,24 @@ function offOriginFetches( win, root ) {
 ( function () {
     var source = 'First page.\n\n\\page\n\nSecond page.\n\n\\page\n\nThird page.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
-    var footers = rendered ? rendered.querySelectorAll( '.hbw-page-footer' ) : [];
+    var rendered = renderRoot( page );
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
+    var numbers = rendered ? rendered.querySelectorAll( '.page > .pageNumber' ) : [];
 
     ok( pages.length === 3, 'page numbers: three pages' );
-    ok( footers.length === 3, 'page numbers: one footer per page' );
-    ok( footers.length === 3 &&
-        footers[0].textContent === '1' &&
-        footers[1].textContent === '2' &&
-        footers[2].textContent === '3',
-        'page numbers: footers read 1, 2, 3 in document order' );
-    ok( footers.length === 3 &&
-        pages[0].lastChild === footers[0] &&
-        pages[1].lastChild === footers[1] &&
-        pages[2].lastChild === footers[2],
-        'page numbers: each footer closes its own page' );
+    ok( numbers.length === 3, 'page numbers: one .pageNumber per page' );
+    ok( numbers.length === 3 &&
+        /(^|\s)auto(\s|$)/.test( numbers[ 0 ].className ) &&
+        /(^|\s)auto(\s|$)/.test( numbers[ 1 ].className ) &&
+        /(^|\s)auto(\s|$)/.test( numbers[ 2 ].className ),
+        'page numbers: each uses the upstream auto counter class' );
+    ok( numbers.length === 3 &&
+        pages[0].lastChild === numbers[0] &&
+        pages[1].lastChild === numbers[1] &&
+        pages[2].lastChild === numbers[2],
+        'page numbers: each .pageNumber closes its own page' );
+    ok( pages.length === 3 && !rendered.querySelector( '.hbw-page-footer' ),
+        'page numbers: no legacy footer blocks remain' );
     ok( page.errors.length === 0, 'page numbers: no console errors' );
 }() );
 
@@ -1001,7 +1087,7 @@ function offOriginFetches( win, root ) {
         + '[^1]: The **first** note.\n\n'
         + '[^2]: The second note, continued\n  on another line.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
     var text = rendered ? rendered.textContent : '';
@@ -1040,8 +1126,8 @@ function offOriginFetches( win, root ) {
         + '[^a]: Note from page one.\n\n'
         + '[^b]: Note from page two.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
-    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var rendered = renderRoot( page );
+    var pages = rendered ? rendered.querySelectorAll( '.page' ) : [];
 
     ok( pages.length === 2, 'cross-page footnotes: two pages' );
     ok( pages.length === 2 &&
@@ -1068,7 +1154,7 @@ function offOriginFetches( win, root ) {
         + '[^n.1]: Dotted label note.\n';
     var page = makePage( source, { withHomebrewery: true } );
     var doc = page.win.document;
-    var rendered = doc.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
 
@@ -1092,7 +1178,7 @@ function offOriginFetches( win, root ) {
         + '[^b]: the alpha note.\n\n'
         + '[^c]: inline code is not a reference.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
     var text = rendered ? rendered.textContent : '';
@@ -1120,7 +1206,7 @@ function offOriginFetches( win, root ) {
         + '```\n[^demo]: example\n```\n\n'
         + '[^demo]: The real note.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
     var text = rendered ? rendered.textContent : '';
 
@@ -1138,7 +1224,7 @@ function offOriginFetches( win, root ) {
     var source = 'Text `a` and `[^b]` here, prose cites beta.[^b]\n\n'
         + '[^b]: beta note.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
     var text = rendered ? rendered.textContent : '';
@@ -1158,7 +1244,7 @@ function offOriginFetches( win, root ) {
     var source = 'Has ``a ` [^b]`` span, prose cites beta.[^b]\n\n'
         + '[^b]: beta note.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
 
@@ -1177,7 +1263,7 @@ function offOriginFetches( win, root ) {
         + '[^two]: note two.\n\n'
         + '[^three]: note three.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
 
@@ -1198,7 +1284,7 @@ function offOriginFetches( win, root ) {
     var source = 'Cites alpha.[^a]\n\n'
         + '[^a]: uses `code` inline.\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
 
@@ -1218,7 +1304,7 @@ function offOriginFetches( win, root ) {
         + 'still code [^b]\n'
         + '[^b]: not a note\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
     var text = rendered ? rendered.textContent : '';
@@ -1241,10 +1327,10 @@ function offOriginFetches( win, root ) {
         + '  ```\n'
         + '  more text\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
-    var columns = rendered ? rendered.querySelectorAll( '.hbw-column pre' ) : [];
+    var columns = rendered ? rendered.querySelectorAll( '.columnWrapper pre' ) : [];
     var noteHtml = notes.length ? notes[ 0 ].innerHTML : '';
 
     ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-a',
@@ -1269,10 +1355,10 @@ function offOriginFetches( win, root ) {
         + 'page code\n'
         + '```\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
     var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
-    var bodyPre = rendered ? rendered.querySelectorAll( '.hbw-column pre' ) : [];
+    var bodyPre = rendered ? rendered.querySelectorAll( '.columnWrapper pre' ) : [];
 
     ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-a',
         'unindented fence: prose reference links its note' );
@@ -1289,7 +1375,7 @@ function offOriginFetches( win, root ) {
 ( function () {
     var source = '<div data-evil="1" data-hbw-footnote="kept">content</div>\n';
     var page = makePage( source, { withHomebrewery: true } );
-    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var rendered = renderRoot( page );
     var divs = rendered ? rendered.querySelectorAll( 'div[data-evil]' ) : [];
 
     ok( !!rendered, 'data hygiene: content rendered' );

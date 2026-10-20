@@ -1,71 +1,47 @@
 /**
- * Brew theme styles (E3S2T4 / E3S2T5).
+ * Parent-side render host styles (E3.5S1).
  *
- * Every selector is scoped under the single wrapper class `.hbw-brew` (Q25),
- * so loading this stylesheet on a brew page cannot touch MonoBook, the wiki
- * chrome, or any other namespace. There are deliberately no bare element,
- * `html`, `body`, `:root` or `*` selectors: the T5 scoping audit fails the
- * build if one sneaks in.
+ * The D&D theme lives inside the iframe and is enqueued only there (Q25 /
+ * E3B6). This file is the host layer: the frame box, pane fit and the plain
+ * source fallback. It is loaded on brew views and brew previews only.
  *
- * This is the structural layer only (page/column blocks, media, tables).
- * The D&D-manual visual theme, including Homebrewery's fonts and artwork,
- * is Epic E's job because those assets need licence review (Q23 / E4).
+ * There are deliberately no theme selectors here: `.hbw-brew` is the outer
+ * host class only, never the isolation boundary.
  */
 
 .hbw-brew {
     overflow-wrap: break-word;
 }
 
-.hbw-brew .hbw-page {
-    margin: 0 0 1.5em;
-}
-
-.hbw-brew .hbw-page:last-child {
-    margin-bottom: 0;
-}
-
-.hbw-brew .hbw-column {
-    max-width: 100%;
-}
-
-.hbw-brew .hbw-column + .hbw-column {
-    margin-top: 1em;
-}
-
-/* Defensive: the pinned renderer emits this marker for a column break; the
- * module normally consumes it. It must never show up as content. */
-.hbw-brew .columnSplit {
-    display: none;
-}
-
-/* Page footer (E3S3T2): the computed page number, one per page block. */
-.hbw-brew .hbw-page-footer {
-    margin-top: 1em;
-    text-align: center;
-}
-
-/* Footnotes (E3S3T3): references ride superscript in the columns; the notes
- * list closes the page below them. */
-.hbw-brew .hbw-footnote-ref {
-    vertical-align: super;
-    font-size: 0.8em;
-}
-
-.hbw-brew .hbw-footnotes {
-    margin-top: 1em;
-}
-
-.hbw-brew .hbw-footnotes-list {
+/* E3.5S1: the same-origin, script-free render host. Height is set by the
+ * render module from the page count; width always follows the pane. */
+.hbw-brew .hbw-frame {
+    display: block;
+    width: 100%;
+    min-height: 400px;
+    border: 0;
     margin: 0;
-    padding-left: 1.4em;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
 }
 
-.hbw-brew img {
-    max-width: 100%;
-    height: auto;
+/* E3.5S1 fallback: the reader always keeps the raw source when the renderer
+ * or the iframe shell fails. */
+.hbw-brew .hbw-brew-text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    font-family: monospace;
 }
 
-.hbw-brew table {
-    border-collapse: collapse;
-    max-width: 100%;
+/* E3.5S4: the print route is a full-window shell, never the wiki page with
+ * brew CSS injected. If the parent is printed anyway, the frame takes the
+ * full sheet and the wiki chrome stays out of the way. */
+@media print {
+    .hbw-brew .hbw-frame {
+        width: 100%;
+        min-height: 0;
+        border: 0;
+    }
 }

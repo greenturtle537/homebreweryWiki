@@ -36,6 +36,33 @@ var VIEWPORT = { width: 1280, height: 1024 };
 var PIXEL_THRESHOLD = 0.1;
 var MAX_DIFF_RATIO = 0.01;
 
+/*
+ * TEST-ONLY geometry stylesheet, injected into the render iframe.
+ *
+ * The compiled upstream theme (vendor/homebrewery-3.21.0/theme/theme.css) is
+ * built by E3.5S2 and does not exist yet. Until it lands, the `.page` box is
+ * the one thing this harness must pin down: letter size and relative
+ * positioning (page numbers and footnotes anchor to it). E3.5S2 replaces
+ * this test stylesheet with the real compiled theme inside the shell.
+ */
+var TEST_PAGE_CSS = [
+    'html, body { margin: 0; padding: 0; background: #fff; }',
+    '.pages { margin: 0; padding: 0; }',
+    '.page { width: 215.9mm; height: 279.4mm; position: relative;',
+    '        margin: 0 auto 16px; overflow: hidden; background: #fff; }',
+    '.page:last-child { margin-bottom: 0; }',
+    '.columnWrapper { padding: 10mm; box-sizing: border-box; }',
+    '.pageNumber { position: absolute; right: 8mm; bottom: 8mm; }',
+    '.hbw-footnotes { margin-top: 0.6em; padding-top: 0.4em;',
+    '                 border-top: 1px solid rgba(0, 0, 0, 0.15);',
+    '                 font-size: 0.75em; line-height: 1.25; }',
+    '.hbw-footnotes-list { margin: 0; padding-left: 1.4em; }',
+    '.hbw-footnote-ref { vertical-align: super; font-size: 0.75em; }',
+    '.hbw-footnote-back { text-decoration: none; }',
+    'img { max-width: 100%; height: auto; }',
+    'table { border-collapse: collapse; max-width: 100%; }'
+].join( '\n' );
+
 var pass = 0;
 var fail = 0;
 
@@ -155,7 +182,8 @@ async function checkFixture( browser, fixture, name ) {
 
     await page.setContent(
         '<!doctype html><html><head><meta charset="utf-8"></head><body>' +
-        '<div id="content"><div class="hbw-brew" id="hbw-brew">' +
+        '<div id="content"><div class="hbw-brew" id="hbw-brew"' +
+        ' data-hbw-page-width="215.9" data-hbw-page-height="279.4">' +
         '<div class="hbw-source" id="hbw-source" style="display:none">' + escaped + '</div>' +
         '<noscript><pre class="hbw-brew-text">\n' + escaped + '</pre></noscript>' +
         '</div></div></body></html>',
@@ -167,55 +195,79 @@ async function checkFixture( browser, fixture, name ) {
     await page.addScriptTag( { content: asset( 'vendor/dompurify-2.5.8.min.js' ) } );
     await page.addScriptTag( { content: asset( 'vendor/homebrewery-3.21.0/renderer.min.js' ) } );
     await page.addScriptTag( { content: asset( 'HomebreweryWiki.render.js' ) } );
-    await page.evaluate( function () {
-        document.dispatchEvent( new Event( 'DOMContentLoaded', { bubbles: true } ) );
-    } );
+
+    await page.waitForSelector( '#hbw-frame', { state: 'attached' } );
+    await page.evaluate( function ( css ) {
+        var frame = document.getElementById( 'hbw-frame' );
+        var doc = frame && frame.contentDocument;
+        var style;
+        if ( !doc ) {
+            throw new Error( 'render iframe has no same-origin document' );
+        }
+        // E3.5S2 will inject the compiled theme here instead.
+        style = doc.createElement( 'style' );
+        style.setAttribute( 'data-hbw-test-geometry', '1' );
+        style.appendChild( doc.createTextNode( css ) );
+        ( doc.head || doc.documentElement ).appendChild( style );
+    }, TEST_PAGE_CSS );
 
     var stats = await page.evaluate( function () {
-        var rendered = document.getElementById( 'hbw-brew-rendered' );
-        if ( !rendered ) {
+        var host = document.getElementById( 'hbw-brew' );
+        var frame = document.getElementById( 'hbw-frame' );
+        var doc = frame && frame.contentDocument;
+        var pages;
+        var numbers;
+        if ( !host || !doc ) {
             return null;
         }
-        var pages = Array.prototype.slice.call( rendered.querySelectorAll( '.hbw-page' ) );
-        var footers = Array.prototype.slice.call(
-            rendered.querySelectorAll( '.hbw-page-footer' )
+        pages = Array.prototype.slice.call(
+            doc.querySelectorAll( '.pages > .page' )
+        );
+        numbers = Array.prototype.slice.call(
+            doc.querySelectorAll( '.pages > .page > .pageNumber' )
         );
         return {
+            render: host.getAttribute( 'data-hbw-render' ),
+            reportedPages: host.getAttribute( 'data-hbw-pages' ),
             pages: pages.length,
+            numbers: numbers.length,
             widths: pages.map( function ( p ) {
                 return Math.round( p.getBoundingClientRect().width );
             } ),
-            footers: footers.map( function ( f ) {
-                return f.textContent.trim();
+            heights: pages.map( function ( p ) {
+                return Math.round( p.getBoundingClientRect().height );
             } ),
-            scrollWidth: document.documentElement.scrollWidth,
-            viewport: window.innerWidth,
-            height: Math.round( rendered.getBoundingClientRect().height )
+            scrollWidth: doc.documentElement.scrollWidth,
+            viewport: doc.documentElement.clientWidth
         };
     } );
 
-    ok( !!stats, 'visual ' + name + ': rendered' );
+    ok( !!stats, 'visual ' + name + ': rendered inside the iframe' );
     if ( !stats ) {
         await page.close();
         return;
     }
 
-    ok( stats.pages === 3, 'visual ' + name + ': three page blocks' );
-    // Fixed letter-page geometry is E5S2's job; at E3 every page fills the
-    // pane and all pages share one width.
+    ok( stats.render === 'html', 'visual ' + name + ': host reports html' );
+    ok( stats.reportedPages === '3',
+        'visual ' + name + ': host reports three pages' );
+    ok( stats.pages === 3, 'visual ' + name + ': iframe .pages holds three .page blocks' );
+    ok( stats.numbers === 3, 'visual ' + name + ': one .pageNumber per page' );
     ok( stats.widths.every( function ( w ) {
-        return w === stats.widths[ 0 ] && w > 600;
-    } ), 'visual ' + name + ': pages share a pane-filling width (' +
+        return Math.abs( w - 816 ) <= 1;
+    } ), 'visual ' + name + ': pages are 215.9mm wide (' +
         stats.widths.join( ',' ) + ')' );
-    ok( stats.footers.join( ',' ) === '1,2,3',
-        'visual ' + name + ': page numbers visible (' + stats.footers.join( ',' ) + ')' );
+    ok( stats.heights.every( function ( h ) {
+        return Math.abs( h - 1056 ) <= 1;
+    } ), 'visual ' + name + ': pages are 279.4mm tall (' +
+        stats.heights.join( ',' ) + ')' );
     ok( stats.scrollWidth <= stats.viewport,
         'visual ' + name + ': no horizontal overflow (' + stats.scrollWidth +
         ' <= ' + stats.viewport + ')' );
     ok( errors.length === 0, 'visual ' + name + ': no console errors (' +
         errors.join( ' | ' ) + ')' );
 
-    var shot = await page.locator( '#hbw-brew-rendered' ).screenshot();
+    var shot = await page.locator( '#hbw-brew' ).screenshot();
     comparePixels( shot, name );
 
     await page.close();

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- E3.5S6: no scripts, no outbound requests; only same-origin styles,
+     fonts and images. The parent injects the theme stylesheet (E3.5S2). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Brew</title>
+<style>
+html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+}
+body {
+    overflow: hidden;
+}
+.pages {
+    margin: 0;
+    padding: 0;
+}
+.page {
+    margin: 0 auto 16px;
+}
+.page:last-child {
+    margin-bottom: 0;
+}
+/* Footnotes are an extension, appended inside the page and kept visually
+ * subordinate to the theme (D5 / E3S3T3). */
+.hbw-footnotes {
+    margin-top: 0.6em;
+    padding-top: 0.4em;
+    border-top: 1px solid rgba(0, 0, 0, 0.15);
+    font-size: 0.75em;
+    line-height: 1.25;
+    color: var(--HB_Color_Footnotes, #58180D);
+}
+.hbw-footnotes-list {
+    margin: 0;
+    padding-left: 1.4em;
+}
+.hbw-footnote-ref {
+    vertical-align: super;
+    font-size: 0.75em;
+}
+.hbw-footnote-back {
+    text-decoration: none;
+}
+img {
+    max-width: 100%;
+    height: auto;
+}
+table {
+    border-collapse: collapse;
+    max-width: 100%;
+}
+/* Print route (E3.5S4): one true letter sheet per page, no screen scaling. */
+@media print {
+    @page {
+        size: 215.9mm 279.4mm;
+        margin: 0;
+    }
+    html, body {
+        width: 215.9mm;
+        background: #fff;
+    }
+    body {
+        overflow: visible;
+    }
+    .pages {
+        transform: none !important;
+        width: 215.9mm;
+    }
+    .page {
+        margin: 0 !important;
+        box-shadow: none !important;
+        break-after: page;
+        page-break-after: always;
+    }
+    .page:last-child {
+        break-after: auto;
+        page-break-after: auto;
+    }
+}
+</style>
+</head>
+<body>
+<div class="brewRenderer">
+    <div class="pages" id="hbw-pages"></div>
+</div>
+</body>
+</html>

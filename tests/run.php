@@ -346,6 +346,8 @@ $themeCss = file_get_contents( $extDir . '/' . $relTheme );
 $themeCss = preg_replace( '!/\*.*?\*/!s', '', $themeCss );
 t_assert( strpos( $themeCss, '#hbw-brew-rendered' ) === false,
     'E3S2 styles: no id selector; scoping is by wrapper class' );
+t_assert( strpos( $themeCss, '.hbw-brew .hbw-frame' ) !== false,
+    'E3.5 styles: parent stylesheet sizes the iframe render host' );
 t_assert( preg_match( '/^\s*(html|body|\*|:root)\s*[,{]/mi', $themeCss ) === 0,
     'E3S2 styles: no bare html/body/*/:root selectors' );
 
@@ -436,6 +438,19 @@ t_assert( ! in_array( '@media screen', $atRuleFound ),
 // --- E1S2 (kept): hidden source placeholder (T2) ---
 $ph = HomebreweryWiki::brewPlaceholder( "= Title =\n<b>x</b> & \"q\"" );
 t_assert( strpos( $ph, 'class="hbw-brew"' ) !== false, 'E1S2 placeholder: scoping wrapper present' );
+t_assert( strpos( $ph, 'data-hbw-shell="' ) !== false,
+    'E3.5 placeholder: iframe shell URL emitted' );
+t_assert( strpos( $ph, 'data-hbw-theme="' ) !== false,
+    'E3.5 placeholder: iframe theme URL emitted' );
+t_assert( strpos( $ph, 'data-hbw-page-width="215.9"' ) !== false,
+    'E3.5 placeholder: letter page width emitted' );
+t_assert( strpos( $ph, 'data-hbw-page-height="279.4"' ) !== false,
+    'E3.5 placeholder: letter page height emitted' );
+t_assert( strpos( $ph, 'data-hbw-print=' ) === false,
+    'E3.5 placeholder: screen view is not marked for print' );
+$phPrint = HomebreweryWiki::brewPlaceholder( "= Title =", true );
+t_assert( strpos( $phPrint, 'data-hbw-print="1"' ) !== false,
+    'E3.5 placeholder: print route is marked' );
 t_assert( strpos( $ph, 'id="hbw-source"' ) !== false, 'E1S2 placeholder: source id present' );
 t_assert( strpos( $ph, 'display:none' ) !== false, 'E1S2 placeholder: hidden' );
 t_assert( strpos( $ph, '<div class="hbw-source"' ) !== false,

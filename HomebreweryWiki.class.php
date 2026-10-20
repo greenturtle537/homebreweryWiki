@@ -312,9 +312,11 @@ class HomebreweryWiki {
 	}
 
 	/**
-	 * Stylesheets in load order (E3S2T4). Every rule in the theme is scoped
-	 * under `.hbw-brew`, so it is only enqueued where the renderer is
-	 * enqueued (brew view / brew preview) and cannot reach other pages.
+	 * Parent-side stylesheets in load order (E3.5S1).
+	 *
+	 * This is the host/shell layer only: iframe sizing, frame border and the
+	 * plain-source fallback. The D&D theme lives inside the iframe, so no
+	 * theme rule is enqueued into the wiki document (Q25 / E3B6).
 	 *
 	 * @return array Style paths relative to $wgScriptPath.
 	 */
@@ -322,6 +324,53 @@ class HomebreweryWiki {
 		return array(
 			HOMEBREWERYWIKI_THEME_CSS,
 		);
+	}
+
+	/**
+	 * URL of the static iframe shell document (E3.5S1).
+	 *
+	 * The shell is a plain static file served by the web server; the parent
+	 * injects the sanitized page DOM into it. MediaWiki 1.14 has no resource
+	 * loader, so the URL is built from $wgScriptPath like the other assets.
+	 *
+	 * @return string
+	 */
+	public static function shellUrl() {
+		global $wgScriptPath;
+		return $wgScriptPath . '/extensions/HomebreweryWiki/HomebreweryWiki.shell.html';
+	}
+
+	/**
+	 * URL of the compiled upstream theme CSS loaded inside the iframe
+	 * (E3.5S2). Override $wgHomebreweryWikiThemeCss in LocalSettings.php to
+	 * point at an admin-supplied theme directory; the default is the vendored
+	 * build artifact.
+	 *
+	 * @return string
+	 */
+	public static function themeCssUrl() {
+		global $wgHomebreweryWikiThemeCss, $wgScriptPath;
+		if ( is_string( $wgHomebreweryWikiThemeCss ) && $wgHomebreweryWikiThemeCss !== '' ) {
+			return $wgHomebreweryWikiThemeCss;
+		}
+		return $wgScriptPath . '/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme/theme.css';
+	}
+
+	/**
+	 * Whether this request is the printable/print route (E3.5S4).
+	 *
+	 * MediaWiki 1.14 exposes the printable view as `printable=yes`; the print
+	 * route reuses the same iframe shell full-window rather than printing the
+	 * wiki page with brew CSS injected.
+	 *
+	 * @param WebRequest|mixed $request Request object.
+	 * @return bool
+	 */
+	public static function isPrintRequest( $request ) {
+		if ( !is_object( $request ) || !method_exists( $request, 'getVal' ) ) {
+			return false;
+		}
+		return ( $request->getVal( 'printable' ) === 'yes' );
 	}
 
     /**
@@ -406,7 +455,7 @@ class HomebreweryWiki {
 
         $text = '<h2>' . htmlspecialchars( wfMsg( 'preview' ) ) . "</h2>\n"
               . '<div class="previewnote">' . $note . "</div>\n"
-              . self::brewPlaceholder( $source );
+              . self::brewPlaceholder( $source, false );
         return true;
     }
 
@@ -532,8 +581,8 @@ class HomebreweryWiki {
         $outputDone = true;
         $pcache     = false;
 
-        global $wgOut;
-        $wgOut->addHTML( self::brewPlaceholder( $article->getBrewText() ) );
+        global $wgOut, $wgRequest;
+        $wgOut->addHTML( self::brewPlaceholder( $article->getBrewText(), self::isPrintRequest( $wgRequest ) ) );
         return true;
     }
 
@@ -553,15 +602,23 @@ class HomebreweryWiki {
      * strips that one instead of a real leading newline.  With JS on, the
      * render module also uses this exact source as its render input.
      *
-     * @param mixed $text Raw brew markdown.
+     * @param mixed $text  Raw brew markdown.
+     * @param bool  $print Whether this is the print route (E3.5S4).
      * @return string HTML fragment.
      */
-    public static function brewPlaceholder( $text ) {
+    public static function brewPlaceholder( $text, $print = false ) {
         if ( !is_string( $text ) ) {
             $text = '';
         }
         $escaped = htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
-        return "<div class=\"hbw-brew\" id=\"hbw-brew\">"
+        $attrs = ' data-hbw-shell="' . htmlspecialchars( self::shellUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
+               . ' data-hbw-theme="' . htmlspecialchars( self::themeCssUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
+               . ' data-hbw-page-width="215.9"'
+               . ' data-hbw-page-height="279.4"';
+        if ( $print ) {
+            $attrs .= ' data-hbw-print="1"';
+        }
+        return "<div class=\"hbw-brew\" id=\"hbw-brew\"" . $attrs . ">"
              . "<div class=\"hbw-source\" id=\"hbw-source\" style=\"display:none\">"
              . $escaped
              . "</div>"

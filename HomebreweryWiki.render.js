@@ -32,17 +32,36 @@
     'use strict';
 
     var SOURCE_ID = 'hbw-source';
-    var RENDERED_ID = 'hbw-brew-rendered';
-    var RENDERED_CLASS = 'hbw-brew-rendered';
-    var PAGE_CLASS = 'hbw-page';
-    var COLUMN_CLASS = 'hbw-column';
-    var PAGE_FOOTER_CLASS = 'hbw-page-footer';
+    var FRAME_ID = 'hbw-frame';
+    var FRAME_CLASS = 'hbw-frame';
+    var FALLBACK_ID = 'hbw-brew-text';
+    var PAGES_CLASS = 'pages';
+    var BREW_RENDERER_CLASS = 'brewRenderer';
+    var PAGE_CLASS = 'page';
+    var COLUMN_WRAPPER_CLASS = 'columnWrapper';
+    var PAGE_NUMBER_CLASS = 'pageNumber';
     var FOOTNOTE_REF_CLASS = 'hbw-footnote-ref';
     var FOOTNOTE_NOTES_CLASS = 'hbw-footnotes';
     var FOOTNOTE_LIST_CLASS = 'hbw-footnotes-list';
     var FOOTNOTE_ITEM_CLASS = 'hbw-footnote';
     var FOOTNOTE_BACK_CLASS = 'hbw-footnote-back';
 
+    /**
+     * Sandbox for the render host (E3.5S6).
+     *
+     * `allow-same-origin` lets the parent write the sanitized brew DOM into
+     * the frame; `allow-scripts` is deliberately absent, so no brew script can
+     * execute even if sanitization were bypassed. Top navigation is limited to
+     * a user activation so wiki links (`target="_top"`) still navigate the
+     * parent, but the brew cannot navigate it on its own.
+     *
+     * @type {string}
+     */
+    var SANDBOX = 'allow-same-origin allow-top-navigation-by-user-activation';
+
+    /** Letter page geometry from upstream Blank/style.less (E3.5S4). */
+    var PAGE_WIDTH_MM = 215.9;
+    var PAGE_HEIGHT_MM = 279.4;
     /**
      * Page marker on a line of its own (Q18 / E3S1).
      *
@@ -56,20 +75,21 @@
     var PAGE_MARKER = /^[ \t]*\\(?:page|pagebreak)(?:[ \t]*\{[^\n{}]*\})?[ \t]*$/;
 
     /**
-     * Column marker on a line of its own.  Only used for the degraded
-     * `marked` path: the pinned renderer turns this into its own
-     * `<div class="columnSplit">` inside the page (see renderPages).
+     * Column marker on a line of its own.  Replaced with the upstream
+     * `.columnSplit` element before rendering: the theme's CSS columns and
+     * `break-after: always` do the column work inside one `.columnWrapper`
+     * (E3.5; no `.hbw-column` blocks are created).
      *
      * @type {RegExp}
      */
     var COLUMN_MARKER = /^[ \t]*\\(?:column|columnbreak)(?:[ \t]*\{[^\n{}]*\})?[ \t]*$/;
 
     /**
-     * The marker the pinned renderer emits for a column break.
+     * Upstream's column-break element.
      *
-     * @type {RegExp}
+     * @type {string}
      */
-    var RENDERED_COLUMN_SPLIT = /<div[^>]*class=["']columnSplit["'][^>]*>\s*<\/div>/gi;
+    var COLUMN_SPLIT_HTML = '<div class="columnSplit"></div>';
 
     /**
      * Version of the pinned Homebrewery renderer vendored in
@@ -408,14 +428,31 @@
     }
 
     /**
-     * Split one page source into column sources.  Only the degraded `marked`
-     * path needs this; the pinned renderer handles `\column` itself.
+     * Replace `\column` marker lines with upstream's `.columnSplit` element
+     * (E3.5).  The theme's CSS columns and `break-after: always` do the column
+     * work inside one `.columnWrapper`; the extension never builds
+     * `.hbw-column` blocks.  Markers inside fenced code stay literal.
      *
-     * @param {string} page page source
-     * @return {Array.<string>} column sources in document order
+     * @param {string} pageSource page source
+     * @return {string} page source with column-split elements
      */
-    function splitColumns( page ) {
-        return splitOnMarker( page, COLUMN_MARKER );
+    function replaceColumnMarkers( pageSource ) {
+        var walker = createProseWalker( pageSource );
+        var out = [];
+        var step;
+        var line;
+        var newline;
+
+        while ( ( step = walker.next() ) !== null ) {
+            newline = step.text.charAt( step.text.length - 1 ) === '\n' ? '\n' : '';
+            line = newline ? step.text.substring( 0, step.text.length - 1 ) : step.text;
+            if ( step.prose && COLUMN_MARKER.test( line ) ) {
+                out.push( COLUMN_SPLIT_HTML + newline );
+                continue;
+            }
+            out.push( step.text );
+        }
+        return out.join( '' );
     }
 
     /**
@@ -474,16 +511,6 @@
                 return { prose: true, text: line + ( index < lines.length ? '\n' : '' ) };
             }
         };
-    }
-
-    /**
-     * Split rendered page HTML at the pinned renderer's columnSplit markers.
-     *
-     * @param {string} html sanitized page HTML
-     * @return {Array.<string>} column HTML in document order
-     */
-    function splitRenderedColumns( html ) {
-        return String( html ).split( RENDERED_COLUMN_SPLIT );
     }
 
     /**
@@ -724,56 +751,33 @@
     }
 
     /**
-     * Render pages to sanitized HTML (E3S1 + E3S2T1).
+     * Render pages to sanitized HTML (E3S1 + E3S2T1 + E3.5).
      *
      * A page is rendered in a single call so the pinned renderer's per-page
-     * state (variable definitions, heading ids) spans all of its columns; the
-     * rendered columnSplit markers are then turned into column blocks.  The
-     * `marked` fallback has no column support, so it renders each column from
-     * the source instead.  Code regions never carry markers: the prose
-     * walker skips them before marking (E3B1).
+     * state (variable definitions, heading ids) spans both CSS columns.
+     * Column breaks arrive as upstream `.columnSplit` elements.  Footnote
+     * markers that landed inside fenced code are restored to source text
+     * after sanitizing (E3S3 review).
      *
      * @param {Array.<string>} pages page sources
      * @param {Object.<string, string>} footnoteNotes footnote bodies by label
-     * @return {Array.<Array.<string>>|null} pages -> columns -> HTML
+     * @return {Array.<string>|null} sanitized page HTML in document order
      */
     function renderPages( pages, footnoteNotes ) {
         var renderedPages = [];
-        var renderedColumns;
-        var columns;
-        var columnHtml;
         var pageMarked;
         var html;
         var p;
-        var c;
 
         for ( p = 0; p < pages.length; p++ ) {
-            pageMarked = markFootnoteRefs( pages[ p ], footnoteNotes );
+            pageMarked = replaceColumnMarkers(
+                markFootnoteRefs( pages[ p ], footnoteNotes )
+            );
             html = renderMarkdown( pageMarked, p );
             if ( html === null ) {
                 return null;
             }
-
-            if ( activeRenderer === 'homebrewery-' + HOMEBREWERY_VERSION ) {
-                renderedPages.push( splitRenderedColumns( html ) );
-                continue;
-            }
-
-            columns = splitColumns( pageMarked );
-            if ( columns.length === 1 ) {
-                renderedPages.push( [ html ] );
-                continue;
-            }
-
-            renderedColumns = [];
-            for ( c = 0; c < columns.length; c++ ) {
-                columnHtml = renderMarkdown( columns[ c ], p );
-                if ( columnHtml === null ) {
-                    return null;
-                }
-                renderedColumns.push( columnHtml );
-            }
-            renderedPages.push( renderedColumns );
+            renderedPages.push( html );
         }
 
         return renderedPages;
@@ -894,6 +898,7 @@
      * @return {void}
      */
     function linkFootnotes( pageSource, pageNode, notes, pageIndex ) {
+        var doc = pageNode.ownerDocument || document;
         var pageNumber = pageIndex + 1;
         var order = [];
         var seen = {};
@@ -956,7 +961,7 @@
                 continue;
             }
             label = labels[ ordinal[ 1 ] ];
-            refLink = document.createElement( 'a' );
+            refLink = doc.createElement( 'a' );
             refLink.setAttribute( 'href', '#hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             // No selector lookup: encoded labels can carry `.`, `(`, `)`
             // and friends, which throw inside querySelector.  The first
@@ -966,7 +971,7 @@
                 refLink.setAttribute( 'id', 'hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             }
             refLink.className = FOOTNOTE_REF_CLASS;
-            refLink.appendChild( document.createTextNode( '[' + label + ']' ) );
+            refLink.appendChild( doc.createTextNode( '[' + label + ']' ) );
             marker.parentNode.replaceChild( refLink, marker );
         }
 
@@ -974,24 +979,24 @@
             return;
         }
 
-        notesNode = document.createElement( 'div' );
+        notesNode = doc.createElement( 'div' );
         notesNode.className = FOOTNOTE_NOTES_CLASS;
-        listNode = document.createElement( 'ol' );
+        listNode = doc.createElement( 'ol' );
         listNode.className = FOOTNOTE_LIST_CLASS;
         notesNode.appendChild( listNode );
 
         for ( i = 0; i < order.length; i++ ) {
             label = order[ i ];
-            itemNode = document.createElement( 'li' );
+            itemNode = doc.createElement( 'li' );
             itemNode.setAttribute( 'id', 'hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
             itemNode.className = FOOTNOTE_ITEM_CLASS;
             itemNode.innerHTML = renderMarkdown( notes[ label ], 0 ) || '';
-            backLink = document.createElement( 'a' );
+            backLink = doc.createElement( 'a' );
             backLink.setAttribute( 'href', '#hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             backLink.className = FOOTNOTE_BACK_CLASS;
             backLink.setAttribute( 'aria-label', 'Back to reference' );
-            backLink.appendChild( document.createTextNode( '\u21A9' ) );
-            itemNode.appendChild( document.createTextNode( ' ' ) );
+            backLink.appendChild( doc.createTextNode( '\u21A9' ) );
+            itemNode.appendChild( doc.createTextNode( ' ' ) );
             itemNode.appendChild( backLink );
             listNode.appendChild( itemNode );
         }
@@ -1000,106 +1005,309 @@
     }
 
     /**
-     * Build the rendered container with one page block per brew page (E3S1).
-     * Each page block holds one column block per `\column` segment, in
-     * document order; E3S3 footnotes and page numbers hang below the last
-     * column of the page they belong to.
+     * Seed the iframe document with the upstream page DOM (E3.5S1).
      *
-     * @param {Array.<Array.<string>>}   renderedPages pages -> columns -> HTML
-     * @param {Array.<string>}           pageSources   page sources (marker
-     *                                   order for the notes)
-     * @param {Object.<string, string>}  notes         footnote bodies by label
-     * @return {HTMLElement}
+     * The shell is a static same-origin document. Every node is created with
+     * that document's factory and only sanitized page HTML is assigned, so no
+     * user HTML ever enters the parent document. Structure is upstream's:
+     * `.brewRenderer > .pages > .page > .columnWrapper`.
+     *
+     * @param {Document} doc iframe document
+     * @param {Array.<string>} renderedPages sanitized page HTML
+     * @param {Array.<string>} pageSources page sources (footnote order)
+     * @param {Object.<string,string>} notes footnote bodies by label
+     * @return {HTMLElement} the `.pages` element
      */
-    function buildRendered( renderedPages, pageSources, notes ) {
-        var container = document.createElement( 'div' );
+    function buildPagesInto( doc, renderedPages, pageSources, notes ) {
+        var body = doc.body;
+        var rendererNode = doc.querySelector( '.' + BREW_RENDERER_CLASS );
+        var pagesNode = rendererNode
+            ? rendererNode.querySelector( '.' + PAGES_CLASS )
+            : null;
         var pageNode;
-        var columnNode;
-        var footerNode;
+        var wrapper;
+        var numberNode;
         var p;
-        var c;
 
-        container.className = RENDERED_CLASS;
-        container.id = RENDERED_ID;
-        container.setAttribute( 'data-hbw-render', 'html' );
-        if ( activeRenderer ) {
-            container.setAttribute( 'data-hbw-renderer', activeRenderer );
+        if ( !rendererNode ) {
+            rendererNode = doc.createElement( 'div' );
+            rendererNode.className = BREW_RENDERER_CLASS;
+            body.appendChild( rendererNode );
+        }
+        if ( !pagesNode ) {
+            pagesNode = doc.createElement( 'div' );
+            pagesNode.className = PAGES_CLASS;
+            pagesNode.id = 'hbw-pages';
+            rendererNode.appendChild( pagesNode );
+        }
+
+        // A preview can render more than once: start from an empty page set.
+        while ( pagesNode.firstChild ) {
+            pagesNode.removeChild( pagesNode.firstChild );
         }
 
         for ( p = 0; p < renderedPages.length; p++ ) {
-            pageNode = document.createElement( 'div' );
+            pageNode = doc.createElement( 'div' );
             pageNode.className = PAGE_CLASS;
-            pageNode.setAttribute( 'data-hbw-page', String( p + 1 ) );
+            pageNode.id = 'p' + ( p + 1 );
+            pageNode.setAttribute( 'data-index', String( p ) );
 
-            for ( c = 0; c < renderedPages[ p ].length; c++ ) {
-                columnNode = document.createElement( 'div' );
-                columnNode.className = COLUMN_CLASS;
-                columnNode.innerHTML = renderedPages[ p ][ c ];
-                pageNode.appendChild( columnNode );
-            }
+            wrapper = doc.createElement( 'div' );
+            wrapper.className = COLUMN_WRAPPER_CLASS;
+            wrapper.innerHTML = renderedPages[ p ];
+            pageNode.appendChild( wrapper );
 
             linkFootnotes( pageSources[ p ], pageNode, notes, p );
 
-            // Page footer: computed page number (E3S3T2).
-            footerNode = document.createElement( 'div' );
-            footerNode.className = PAGE_FOOTER_CLASS;
-            footerNode.appendChild( document.createTextNode( String( p + 1 ) ) );
-            pageNode.appendChild( footerNode );
+            // Upstream page number: `.pageNumber.auto` uses the theme's CSS
+            // counter, so no number is hard-coded here (E3.5S4 / E3S3T2).
+            numberNode = doc.createElement( 'div' );
+            numberNode.className = PAGE_NUMBER_CLASS + ' auto';
+            pageNode.appendChild( numberNode );
 
-            container.appendChild( pageNode );
+            pagesNode.appendChild( pageNode );
         }
 
-        return container;
+        return pagesNode;
     }
 
     /**
-     * Build the visible pane content from the hidden source placeholder.
+     * Millimetres to CSS pixels, measured in the parent document so the result
+     * matches the browser's own mm unit. Falls back to the CSS definition of
+     * 96 px per inch when layout is unavailable (jsdom).
+     *
+     * @param {number} mm
+     * @return {number} pixels
+     */
+    function mmToPx( mm ) {
+        var probe = document.createElement( 'div' );
+        var px;
+        probe.style.position = 'absolute';
+        probe.style.visibility = 'hidden';
+        probe.style.width = mm + 'mm';
+        document.body.appendChild( probe );
+        px = probe.getBoundingClientRect
+            ? probe.getBoundingClientRect().width
+            : 0;
+        document.body.removeChild( probe );
+        return px || ( mm * 96 / 25.4 );
+    }
+
+    /**
+     * Add the theme stylesheet to the iframe document (E3.5S2). The parent
+     * writes the link because the iframe runs no scripts; the URL comes from
+     * the host data attribute, so the build's asset base stays configurable.
+     *
+     * @param {Document} doc iframe document
+     * @param {string} href configured theme CSS URL
+     * @return {void}
+     */
+    function injectTheme( doc, href ) {
+        var links;
+        var link;
+        var i;
+        if ( !href ) {
+            return;
+        }
+        links = doc.querySelectorAll( 'link[rel="stylesheet"]' );
+        for ( i = 0; i < links.length; i++ ) {
+            if ( links[ i ].getAttribute( 'href' ) === href ) {
+                return;
+            }
+        }
+        link = doc.createElement( 'link' );
+        link.setAttribute( 'rel', 'stylesheet' );
+        link.setAttribute( 'href', href );
+        ( doc.head || doc.documentElement ).appendChild( link );
+    }
+
+    /**
+     * Size the frame from the page count (E3.5S1 baseline; E3.5S4 adds pane
+     * fit and the ResizeObserver).
+     *
+     * @param {HTMLElement} frame
+     * @param {HTMLElement} pagesNode
+     * @return {void}
+     */
+    function sizeFrame( frame, pagesNode ) {
+        var count = pagesNode.querySelectorAll( '.' + PAGE_CLASS ).length;
+        var gap = 16;
+        var height;
+        if ( !count ) {
+            return;
+        }
+        height = Math.ceil( mmToPx( PAGE_HEIGHT_MM ) * count + gap * ( count - 1 ) );
+        frame.style.width = '100%';
+        frame.style.height = height + 'px';
+    }
+
+    /**
+     * Create the sandboxed same-origin render host (E3.5S1 / E3.5S6).
+     *
+     * @return {HTMLIFrameElement}
+     */
+    function createFrame() {
+        var frame = document.createElement( 'iframe' );
+        frame.id = FRAME_ID;
+        frame.className = FRAME_CLASS;
+        frame.setAttribute( 'title', 'Brew pages' );
+        frame.setAttribute( 'sandbox', SANDBOX );
+        frame.setAttribute( 'referrerpolicy', 'no-referrer' );
+        frame.setAttribute( 'scrolling', 'no' );
+        frame.setAttribute(
+            'allow',
+            "camera 'none'; microphone 'none'; geolocation 'none'; " +
+            "payment 'none'; usb 'none'"
+        );
+        return frame;
+    }
+
+    /**
+     * Plain-source fallback: never hide the reader's content when the renderer
+     * or the frame fails.
+     *
+     * @param {HTMLElement} host
+     * @param {string} text raw brew source
+     * @return {void}
+     */
+    function showFallback( host, text ) {
+        var rendered = document.createElement( 'pre' );
+        var source = document.getElementById( SOURCE_ID );
+        rendered.className = 'hbw-brew-text';
+        rendered.id = FALLBACK_ID;
+        rendered.appendChild( document.createTextNode( text ) );
+        rendered.setAttribute( 'data-hbw-render', 'fallback' );
+        host.appendChild( rendered );
+        if ( source && source.parentNode ) {
+            source.parentNode.removeChild( source );
+        }
+        host.setAttribute( 'data-hbw-render', 'fallback' );
+    }
+
+    /**
+     * Build the visible pane content from the hidden source placeholder and
+     * inject it into the iframe shell (E3.5S1).
      */
     function renderBrew() {
         var source = document.getElementById( SOURCE_ID );
+        var host;
+        var text;
+        var shell;
+        var theme;
+        var frame;
+        var done = false;
+        var timer = null;
+
         if ( !source ) {
             // Not a brew view, or already rendered.
             return;
         }
-
-        var host = source.parentNode;
+        host = source.parentNode;
         if ( !host ) {
             return;
         }
+        text = source.textContent || source.innerText || '';
+        shell = host.getAttribute( 'data-hbw-shell' ) || '';
+        theme = host.getAttribute( 'data-hbw-theme' ) || '';
+        frame = createFrame();
 
-        var text = source.textContent || source.innerText || '';
-        var renderedPages = null;
-        var pageSources = null;
-        var footnoteData = null;
-        var rendered = null;
+        function fallback() {
+            if ( done ) {
+                return;
+            }
+            done = true;
+            if ( timer !== null ) {
+                clearTimeout( timer );
+            }
+            if ( frame.parentNode ) {
+                frame.parentNode.removeChild( frame );
+            }
+            showFallback( host, text );
+        }
 
-        activeRenderer = null;
+        function finish() {
+            var doc;
+            var pageSources;
+            var footnoteData;
+            var renderedPages;
+            var pagesNode;
+
+            if ( done ) {
+                return;
+            }
+            try {
+                doc = frame.contentDocument ||
+                    ( frame.contentWindow && frame.contentWindow.document );
+            } catch ( e ) {
+                doc = null;
+            }
+            if ( !doc || !doc.body ) {
+                fallback();
+                return;
+            }
+
+            activeRenderer = null;
+            try {
+                pageSources = splitPages( text );
+                footnoteData = extractFootnotes( pageSources );
+                renderedPages = renderPages(
+                    footnoteData.pages, footnoteData.notes
+                );
+            } catch ( e ) {
+                renderedPages = null;
+            }
+            if ( renderedPages === null ) {
+                fallback();
+                return;
+            }
+
+            done = true;
+            if ( timer !== null ) {
+                clearTimeout( timer );
+            }
+
+            injectTheme( doc, theme );
+            pagesNode = buildPagesInto(
+                doc, renderedPages, footnoteData.pages, footnoteData.notes
+            );
+            sizeFrame( frame, pagesNode );
+
+            host.setAttribute( 'data-hbw-render', 'html' );
+            host.setAttribute( 'data-hbw-pages', String( renderedPages.length ) );
+            if ( activeRenderer ) {
+                host.setAttribute( 'data-hbw-renderer', activeRenderer );
+            }
+            if ( source.parentNode ) {
+                source.parentNode.removeChild( source );
+            }
+        }
 
         try {
-            pageSources = splitPages( text );
-            footnoteData = extractFootnotes( pageSources );
-            renderedPages = renderPages( footnoteData.pages, footnoteData.notes );
+            host.appendChild( frame );
         } catch ( e ) {
-            renderedPages = null;
+            fallback();
+            return;
         }
 
-        if ( renderedPages !== null ) {
-            rendered = buildRendered(
-                renderedPages, footnoteData.pages, footnoteData.notes
-            );
-            host.appendChild( rendered );
+        if ( shell ) {
+            frame.setAttribute( 'src', shell );
+            if ( frame.addEventListener ) {
+                frame.addEventListener( 'load', finish, false );
+            } else if ( frame.attachEvent ) {
+                frame.attachEvent( 'onload', finish );
+            }
+            // A shell that never loads must not leave the reader with a blank
+            // pane: fall back to the plain source view.
+            timer = setTimeout( function () {
+                if ( !done ) {
+                    fallback();
+                }
+            }, 10000 );
         } else {
-            // Degraded path: never hide the reader's content because the
-            // renderer bundle failed to load or threw.
-            rendered = document.createElement( 'pre' );
-            rendered.className = 'hbw-brew-text';
-            rendered.id = 'hbw-brew-text';
-            rendered.appendChild( document.createTextNode( text ) );
-            rendered.setAttribute( 'data-hbw-render', 'fallback' );
-            host.appendChild( rendered );
+            // Embedded/test path: an iframe without a src is about:blank and
+            // already same-origin, so the document exists synchronously.
+            finish();
         }
-
-        host.removeChild( source );
     }
 
     if ( document.readyState === 'complete' || document.readyState === 'interactive' ) {

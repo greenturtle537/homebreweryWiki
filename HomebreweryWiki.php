@@ -41,6 +41,13 @@ define( 'HOMEBREWERYWIKI_RENDER_MODULE', '/extensions/HomebreweryWiki/Homebrewer
 define( 'HOMEBREWERYWIKI_THEME_CSS', '/extensions/HomebreweryWiki/HomebreweryWiki.theme.css' );
 
 /**
+ * Compiled theme CSS loaded inside the iframe (E3.5S2).  NULL uses the
+ * vendored build artifact; set it in LocalSettings.php to an admin-supplied
+ * theme directory when the bundled assets are not licence-cleared.
+ */
+$wgHomebreweryWikiThemeCss = null;
+
+/**
  * Extension credits (MediaWiki 1.14 shape).
  *
  * 1.14 has no extension.json / wfLoadExtension; registration is done with the

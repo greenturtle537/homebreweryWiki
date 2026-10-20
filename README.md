@@ -106,3 +106,11 @@ There is no build step for the extension itself: the front-end assets
 (`HomebreweryWiki.render.js` plus `vendor/`) are plain static files served by
 the web server, in the load order declared by
 `HomebreweryWiki::rendererAssets()`.
+
+The brew itself renders inside `HomebreweryWiki.shell.html`, a static
+same-origin iframe served from the extension directory. The parent renders and
+sanitizes the markdown, then injects the upstream page DOM
+(`.brewRenderer > .pages > .page > .columnWrapper`) into the frame; the frame
+runs no scripts (`sandbox="allow-same-origin
+allow-top-navigation-by-user-activation"`). The compiled theme stylesheet is
+loaded inside the frame, never in the wiki document.
