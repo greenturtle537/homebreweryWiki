@@ -421,5 +421,112 @@ t_assert( count( $brewGateTitle->getUserPermissionsErrors( 'read', $anon ) ) ===
           count( $mainGateTitle->getUserPermissionsErrors( 'read', $anon ) ) === 0,
     'E2S1 perms: anonymous read allowed on brew and normal pages' );
 
+// --- E2S2: trusted-only image uploads (T1-T2) ---
+// Upload is a trusted-editor action, and the file policy is raster-only.
+global $wgFileExtensions, $wgCheckFileExtensions, $wgStrictFileExtensions, $wgMaxUploadSize;
+
+t_assert( isset( $wgGroupPermissions['*']['upload'] ) &&
+          $wgGroupPermissions['*']['upload'] === false,
+    'E2S2 upload: anonymous group denied the upload right' );
+t_assert( !empty( $wgGroupPermissions['user']['upload'] ),
+    'E2S2 upload: trusted group holds the upload right' );
+t_assert( $anon->isAllowed( 'upload' ) === false,
+    'E2S2 upload: anonymous user cannot upload' );
+t_assert( $trusted->isAllowed( 'upload' ) === true,
+    'E2S2 upload: trusted user can upload' );
+
+t_assert( in_array( 'png', $wgFileExtensions ) &&
+          in_array( 'jpg', $wgFileExtensions ) &&
+          in_array( 'jpeg', $wgFileExtensions ) &&
+          in_array( 'gif', $wgFileExtensions ),
+    'E2S2 file policy: raster types allowed' );
+t_assert( in_array( 'svg', $wgFileExtensions ) === false,
+    'E2S2 file policy: SVG disallowed' );
+t_assert( in_array( 'webp', $wgFileExtensions ) === false,
+    'E2S2 file policy: WebP excluded (1.14 has no WebP support)' );
+t_assert( $wgCheckFileExtensions === true,
+    'E2S2 file policy: extension checks enabled' );
+t_assert( $wgStrictFileExtensions === true,
+    'E2S2 file policy: strict extension allowlist enabled' );
+t_assert( is_int( $wgMaxUploadSize ) && $wgMaxUploadSize > 0 &&
+          $wgMaxUploadSize <= 20 * 1024 * 1024,
+    'E2S2 size policy: upload size bounded at 20 MB or less' );
+t_assert( $wgEnableUploads === true,
+    'E2S2 upload: local uploads enabled for the trusted editors' );
+
+// The size cap must be enforced on the local-upload path, not only in config.
+t_assert( HomebreweryWiki::isUploadSizeAllowed( 1024 ) === true,
+    'E2S2 size guard: small file allowed' );
+t_assert( HomebreweryWiki::isUploadSizeAllowed( HOMEBREWERYWIKI_MAX_UPLOAD_SIZE ) === true,
+    'E2S2 size guard: file exactly at the 10 MB boundary allowed' );
+t_assert( HomebreweryWiki::isUploadSizeAllowed( HOMEBREWERYWIKI_MAX_UPLOAD_SIZE + 1 ) === false,
+    'E2S2 size guard: one byte over the boundary denied' );
+t_assert( HomebreweryWiki::isUploadSizeAllowed( false ) === false,
+    'E2S2 size guard: unknown size denied' );
+
+$hbwTmpUpload = tempnam( sys_get_temp_dir(), 'hbwup' );
+$hbwHandle = fopen( $hbwTmpUpload, 'w' );
+ftruncate( $hbwHandle, HOMEBREWERYWIKI_MAX_UPLOAD_SIZE );
+fclose( $hbwHandle );
+clearstatcache();
+$hbwUploadError = 'unset';
+t_assert( HomebreweryWiki::onUploadVerification( 'Boundary.png', $hbwTmpUpload, $hbwUploadError ) === true &&
+          $hbwUploadError === 'unset',
+    'E2S2 size hook: local file at the boundary accepted' );
+
+$hbwHandle = fopen( $hbwTmpUpload, 'w' );
+ftruncate( $hbwHandle, HOMEBREWERYWIKI_MAX_UPLOAD_SIZE + 1 );
+fclose( $hbwHandle );
+clearstatcache();
+$hbwUploadError = '';
+t_assert( HomebreweryWiki::onUploadVerification( 'TooBig.png', $hbwTmpUpload, $hbwUploadError ) === false &&
+          $hbwUploadError !== '',
+    'E2S2 size hook: oversized local file rejected with an error' );
+
+$hbwUploadError = '';
+t_assert( HomebreweryWiki::onUploadVerification( 'Missing.png', sys_get_temp_dir() . '/hbw-no-such-file', $hbwUploadError ) === false,
+    'E2S2 size hook: unreadable temporary file rejected' );
+@unlink( $hbwTmpUpload );
+
+// --- E2S3: brew pages inherit the global read policy (T1-T2) ---
+// No brew-specific read override: the extension never adds the brew
+// namespaces to $wgNamespaceProtection (1.14 would gate read with it) and
+// never changes the read right for the brew namespaces.  The regression check
+// below compares brew pages against normal pages under two policies.
+global $wgNamespaceProtection, $wgGroupPermissions;
+
+t_assert( !isset( $wgNamespaceProtection[NS_MANUAL] ) &&
+          !isset( $wgNamespaceProtection[NS_MANUAL_TALK] ),
+    'E2S3 read: no namespace protection (1.14 would gate read with it)' );
+
+$brewReadAnon  = $brewGateTitle->getUserPermissionsErrors( 'read', $anon );
+$mainReadAnon  = $mainGateTitle->getUserPermissionsErrors( 'read', $anon );
+$talkReadAnon  = $talkGateTitle->getUserPermissionsErrors( 'read', $anon );
+t_assert( count( $brewReadAnon ) === 0 && count( $talkReadAnon ) === 0 &&
+          count( $mainReadAnon ) === 0,
+    'E2S3 read: anonymous read allowed on brew, brew talk and normal pages' );
+
+$brewReadUser  = $brewGateTitle->getUserPermissionsErrors( 'read', $trusted );
+$mainReadUser  = $mainGateTitle->getUserPermissionsErrors( 'read', $trusted );
+t_assert( count( $brewReadUser ) === count( $mainReadUser ),
+    'E2S3 read: trusted read parity between brew and normal pages' );
+
+// Change the global read policy and confirm brew and normal pages move
+// together (no divergence) for anonymous visitors.
+$savedAnonRead = isset( $wgGroupPermissions['*']['read'] )
+    ? $wgGroupPermissions['*']['read'] : null;
+$wgGroupPermissions['*']['read'] = false;
+$anonymousUnderLockdown = new User();
+$brewReadLocked = $brewGateTitle->getUserPermissionsErrors( 'read', $anonymousUnderLockdown );
+$mainReadLocked = $mainGateTitle->getUserPermissionsErrors( 'read', $anonymousUnderLockdown );
+t_assert( count( $brewReadLocked ) === count( $mainReadLocked ) &&
+          count( $brewReadLocked ) > 0,
+    'E2S3 read: brew and normal pages change together with the global policy' );
+if ( $savedAnonRead === null ) {
+    unset( $wgGroupPermissions['*']['read'] );
+} else {
+    $wgGroupPermissions['*']['read'] = $savedAnonRead;
+}
+
 echo "\n$pass passed, $fail failed\n";
 exit( $fail > 0 ? 1 : 0 );

@@ -129,6 +129,43 @@ class HomebreweryWiki {
     }
 
     /**
+     * Whether an upload of $size bytes is within the extension's limit (E2S2).
+     *
+     * @param mixed $size File size in bytes, as reported by filesize().
+     * @return bool True when the size is known and at or below the 10 MB cap.
+     */
+    public static function isUploadSizeAllowed( $size ) {
+        if ( !is_numeric( $size ) ) {
+            return false;
+        }
+        $size = (int)$size;
+        return $size >= 0 && $size <= HOMEBREWERYWIKI_MAX_UPLOAD_SIZE;
+    }
+
+    /**
+     * UploadVerification hook (E2S2).  On MediaWiki 1.14 $wgMaxUploadSize only
+     * covers URL-copy uploads, so local uploads are checked here against the
+     * same 10 MB cap before the file is stored.
+     *
+     * MediaWiki 1.14 signature: ( $destName, $tempPath, &$error ).
+     *
+     * @param string $destName Destination file name (unused).
+     * @param string $tempPath Path to the uploaded temporary file.
+     * @param string &$error  Error message shown to the user on rejection.
+     * @return bool False to reject the upload.
+     */
+    public static function onUploadVerification( $destName, $tempPath, &$error ) {
+        $size = @filesize( $tempPath );
+        if ( $size === false || ! HomebreweryWiki::isUploadSizeAllowed( $size ) ) {
+            // 1.14 does not lazily load extension messages outside core paths.
+            wfLoadExtensionMessages( 'HomebreweryWiki' );
+            $error = wfMsg( 'homebrewerywiki-upload-too-large' );
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * ArticleSave hook.  Reject brew saves whose source is not valid UTF-8
      * text, so a corrupt revision can never be stored (E1S1T7).
      *

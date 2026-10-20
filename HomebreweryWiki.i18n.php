@@ -17,6 +17,7 @@ $messages = array();
 $messages['en'] = array(
     'homebrewerywiki-desc'                => 'Renders Homebrewery-flavoured markdown (brew pages) inside the standard MediaWiki content pane.',
     'homebrewerywiki-invalid-brew-text'   => 'The brew page source must be valid UTF-8 text.',
+    'homebrewerywiki-upload-too-large'    => 'The file is larger than the 10 MB upload limit.',
 );
 
 /** Message documentation (used only by translatewiki.net; ignored by MediaWiki) */

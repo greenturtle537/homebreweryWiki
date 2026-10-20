@@ -18,7 +18,7 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 }
 
 /** Extension version, surfaced on Special:Version. */
-define( 'HOMEBREWERYWIKI_VERSION', '0.5.0' );
+define( 'HOMEBREWERYWIKI_VERSION', '0.6.0' );
 
 /**
  * Front-end renderer assets (E1S3), relative to $wgScriptPath, in load order.
@@ -105,6 +105,36 @@ $wgGroupPermissions['user']['edit']       = true;
 $wgGroupPermissions['user']['createpage'] = true;
 $wgGroupPermissions['user']['createtalk'] = true;
 $wgGroupPermissions['user']['upload']     = true;
+
+/**
+ * Upload policy (E2S2, decisions Q14/Q21).
+ *
+ * Uploads are a trusted-editor action: the `upload` right was granted to
+ * logged-in accounts and withheld from anonymous visitors above.  The file
+ * policy is raster-only - SVG is deliberately excluded because it can carry
+ * script - and matches the 1.14 default allowlist (png/gif/jpg/jpeg).  WebP is
+ * not listed: 1.14 has no WebP MIME mapping or thumbnail support (added in
+ * 1.26), so an uploaded .webp would not render as a wiki image.
+ */
+define( 'HOMEBREWERYWIKI_MAX_UPLOAD_SIZE', 10 * 1024 * 1024 ); // 10 MB
+
+$wgFileExtensions = array( 'png', 'jpg', 'jpeg', 'gif' );
+$wgCheckFileExtensions = true;
+$wgStrictFileExtensions = true;
+$wgMaxUploadSize = HOMEBREWERYWIKI_MAX_UPLOAD_SIZE;
+
+/**
+ * Local-upload size guard (E2S2).  On 1.14 $wgMaxUploadSize only applies to
+ * URL-copy uploads, so a local POST could exceed it if PHP accepts the file.
+ * The UploadVerification hook enforces the same limit for local uploads.
+ */
+$wgHooks['UploadVerification'][] = 'HomebreweryWiki::onUploadVerification';
+
+/**
+ * 1.14 disables uploads globally by default; this wiki allows them for the
+ * trusted editors above (E4 image references depend on it).
+ */
+$wgEnableUploads = true;
 
 /**
  * Message files.  On 1.14 these are plain PHP files holding a $messages array;
