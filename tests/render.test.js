@@ -762,6 +762,111 @@ function makePage( source, options ) {
         'no-leak: the non-brew fixture has no brew wrapper at all' );
 }() );
 
+// --- E3S3 T1: table contents render through the pipeline ---
+( function () {
+    var source = '# Tables\n\n'
+        + '| Roll | Result |\n|------|--------|\n| 1-5  | Nothing |\n| 6    | Something |\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var table = rendered ? rendered.querySelector( 'table' ) : null;
+    var headers = table ? table.querySelectorAll( 'th' ) : [];
+    var cells = table ? table.querySelectorAll( 'td' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( rendered && rendered.getAttribute( 'data-hbw-renderer' ) === 'homebrewery-3.21.0',
+        'tables: pinned renderer is in use' );
+    ok( !!table, 'tables: table element emitted' );
+    ok( headers.length === 2 && headers[0].textContent === 'Roll' &&
+        headers[1].textContent === 'Result',
+        'tables: header row content preserved' );
+    ok( cells.length === 4 && cells[3].textContent === 'Something',
+        'tables: body rows and cells preserved' );
+    ok( text.indexOf( '| Roll' ) === -1, 'tables: no raw table markup leaks' );
+    ok( page.errors.length === 0, 'tables: no console errors' );
+}() );
+
+// --- E3S3 T2: every page footer shows its computed page number ---
+( function () {
+    var source = 'First page.\n\n\\page\n\nSecond page.\n\n\\page\n\nThird page.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+    var footers = rendered ? rendered.querySelectorAll( '.hbw-page-footer' ) : [];
+
+    ok( pages.length === 3, 'page numbers: three pages' );
+    ok( footers.length === 3, 'page numbers: one footer per page' );
+    ok( footers.length === 3 &&
+        footers[0].textContent === '1' &&
+        footers[1].textContent === '2' &&
+        footers[2].textContent === '3',
+        'page numbers: footers read 1, 2, 3 in document order' );
+    ok( footers.length === 3 &&
+        pages[0].lastChild === footers[0] &&
+        pages[1].lastChild === footers[1] &&
+        pages[2].lastChild === footers[2],
+        'page numbers: each footer closes its own page' );
+    ok( page.errors.length === 0, 'page numbers: no console errors' );
+}() );
+
+// --- E3S3 T3: footnote references resolve to their notes ---
+( function () {
+    var source = 'A claim with a footnote.[^1] Later on the same page.[^2]\n\n'
+        + 'An undefined marker [^nope] stays plain.\n\n'
+        + '[^1]: The **first** note.\n\n'
+        + '[^2]: The second note, continued\n  on another line.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var text = rendered ? rendered.textContent : '';
+
+    ok( refs.length === 2, 'footnotes: both defined references link' );
+    ok( refs.length === 2 &&
+        refs[0].getAttribute( 'href' ) === '#hbw-fn-1' &&
+        refs[1].getAttribute( 'href' ) === '#hbw-fn-2',
+        'footnotes: reference links point at their notes' );
+    ok( notes.length === 2, 'footnotes: two notes emitted' );
+    ok( notes.length === 2 &&
+        notes[0].getAttribute( 'id' ) === 'hbw-fn-1' &&
+        notes[1].getAttribute( 'id' ) === 'hbw-fn-2',
+        'footnotes: notes carry linkable ids in reference order' );
+    ok( notes.length === 2 &&
+        !!notes[0].querySelector( 'strong' ) &&
+        notes[1].textContent.indexOf( 'another line' ) !== -1,
+        'footnotes: note bodies render (markdown + continuations)' );
+    ok( notes.length === 2 &&
+        !!notes[0].querySelector( 'a.hbw-footnote-back' ) &&
+        notes[0].querySelector( 'a.hbw-footnote-back' )
+            .getAttribute( 'href' ) === '#hbw-fnref-1',
+        'footnotes: notes link back to their references' );
+    ok( text.indexOf( '[^1]:' ) === -1 && text.indexOf( '[^2]:' ) === -1,
+        'footnotes: definition syntax never renders as body text' );
+    ok( text.indexOf( '[^nope]' ) !== -1,
+        'footnotes: undefined references stay plain text' );
+    ok( page.errors.length === 0, 'footnotes: no console errors' );
+}() );
+
+// --- E3S3 T3: footnote definitions resolve across pages ---
+( function () {
+    var source = 'First page refs one.[^a]\n\n'
+        + '\\page\n\n'
+        + 'Second page refs two.[^b]\n\n'
+        + '[^a]: Note from page one.\n\n'
+        + '[^b]: Note from page two.\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var pages = rendered ? rendered.querySelectorAll( '.hbw-page' ) : [];
+
+    ok( pages.length === 2, 'cross-page footnotes: two pages' );
+    ok( pages.length === 2 &&
+        !!pages[0].querySelector( 'a[href="#hbw-fn-a"]' ) &&
+        !!pages[0].querySelector( '#hbw-fn-a' ) &&
+        !!pages[1].querySelector( 'a[href="#hbw-fn-b"]' ) &&
+        !!pages[1].querySelector( '#hbw-fn-b' ),
+        'cross-page footnotes: each page links and lists its own notes' );
+    ok( page.errors.length === 0, 'cross-page footnotes: no console errors' );
+}() );
+
 // --- ES5 floor (Q19): module source stays ES5 ---
 ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     'ES5: render module uses no ES6 syntax' );
