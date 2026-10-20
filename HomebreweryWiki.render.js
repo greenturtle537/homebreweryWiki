@@ -36,6 +36,12 @@
     var RENDERED_CLASS = 'hbw-brew-rendered';
     var PAGE_CLASS = 'hbw-page';
     var COLUMN_CLASS = 'hbw-column';
+    var PAGE_FOOTER_CLASS = 'hbw-page-footer';
+    var FOOTNOTE_REF_CLASS = 'hbw-footnote-ref';
+    var FOOTNOTE_NOTES_CLASS = 'hbw-footnotes';
+    var FOOTNOTE_LIST_CLASS = 'hbw-footnotes-list';
+    var FOOTNOTE_ITEM_CLASS = 'hbw-footnote';
+    var FOOTNOTE_BACK_CLASS = 'hbw-footnote-back';
 
     /**
      * Page marker on a line of its own (Q18 / E3S1).
@@ -351,6 +357,7 @@
         var box = document.createElement( 'div' );
         box.innerHTML = clean;
         hardenTree( box );
+        box.innerHTML = restoreFencedMarkers( box.innerHTML );
         return box.innerHTML;
     }
 
@@ -404,6 +411,39 @@
     }
 
     /**
+     * Footnote fenced-code marker: an empty, content-free marker span never
+     * flows inside a code fence from our own pipeline, so a span-looking
+     * string inside `<pre><code>` is author text, not a marker.
+     *
+     * @type {RegExp}
+     */
+    var FENCED_MARKER = /<pre><code>((?:(?!<\/code>)[\s\S])*?)<\/code><\/pre>/g;
+
+    /**
+     * Strip marker spans that ended up inside fenced code (E3S3 review).
+     *
+     * `markFootnoteRefs` runs on the bare source, so it cannot know which
+     * `[^label]` sit inside a fence; the renderer then turns those spans
+     * into literal code text.  This pass restores the original reference
+     * text inside `<pre><code>` only, so code samples stay byte-identical
+     * while real references elsewhere keep linking.  `[^demo]` becomes the
+     * literal text again; the rest of the fence is untouched.
+     *
+     * @param {string} html rendered HTML
+     * @return {string} HTML with fence markers restored to source text
+     */
+    function restoreFencedMarkers( html ) {
+        return String( html ).replace( FENCED_MARKER, function ( whole, code ) {
+            return '<pre><code>' +
+                code.replace(
+                    /&lt;span class="hbw-footnote-mark" data-hbw-footnote="([^"&]+)"&gt;&lt;\/span&gt;/g,
+                    '[^$1]'
+                ) +
+                '</code></pre>';
+        } );
+    }
+
+    /**
      * Split rendered page HTML at the pinned renderer's columnSplit markers.
      *
      * @param {string} html sanitized page HTML
@@ -414,28 +454,122 @@
     }
 
     /**
+     * Footnote reference (`[^label]`) inside source text.
+     *
+     * @type {RegExp}
+     */
+    var FOOTNOTE_REF = /\[\^([^\]\s]+)\]/g;
+
+    /**
+     * Footnote definition line (`[^label]: note text`), the definition's
+     * first line.  Continuation lines belong to the definition below.
+     *
+     * @type {RegExp}
+     */
+    var FOOTNOTE_DEF_LINE = /^[ \t]*\[\^([^\]\s]+)\][ \t]*:[ \t]*(.*)$/;
+
+    /**
+     * Strip footnote definitions from one page source (E3S3T3).
+     *
+     * Definitions live brew-wide: a definition found on any page resolves
+     * references on any page, matching how readers follow a brew.  Definition
+     * lines (and their indented continuations) are removed up front because
+     * the pinned renderer would otherwise rewrite `[^label]` text into its
+     * own superscript spans before this extension ever sees them.  Note
+     * bodies stay verbatim so bold, links and tables still apply inside the
+     * notes.
+     *
+     * @param {Array.<string>} pages page sources
+     * @return {{ pages: Array.<string>, notes: Object.<string, string> }}
+     */
+    function extractFootnotes( pages ) {
+        var notes = {};
+        var cleaned = [];
+        var lines;
+        var kept;
+        var current;
+        var fenceChar;
+        var fenceLength;
+        var fence;
+        var match;
+        var p;
+        var i;
+
+        for ( p = 0; p < pages.length; p++ ) {
+            lines = String( pages[ p ] ).split( /\r\n|\r|\n/ );
+            kept = [];
+            current = null;
+            fenceChar = null;
+            fenceLength = 0;
+            for ( i = 0; i < lines.length; i++ ) {
+                if ( current !== null &&
+                    ( /^[ \t]+/.test( lines[ i ] ) || lines[ i ] === '' ) ) {
+                    notes[ current ] += '\n' + lines[ i ];
+                    continue;
+                }
+                current = null;
+
+                if ( fenceChar !== null ) {
+                    kept.push( lines[ i ] );
+                    fence = new RegExp(
+                        '^ {0,3}' + fenceChar + '{' + fenceLength + ',}[ \\t]*$'
+                    );
+                    if ( fence.test( lines[ i ] ) ) {
+                        fenceChar = null;
+                        fenceLength = 0;
+                    }
+                    continue;
+                }
+
+                fence = /^ {0,3}(`{3,}|~{3,})/.exec( lines[ i ] );
+                if ( fence ) {
+                    fenceChar = fence[ 1 ].charAt( 0 );
+                    fenceLength = fence[ 1 ].length;
+                    kept.push( lines[ i ] );
+                    continue;
+                }
+
+                match = FOOTNOTE_DEF_LINE.exec( lines[ i ] );
+                if ( match ) {
+                    current = match[ 1 ];
+                    notes[ current ] = match[ 2 ];
+                    continue;
+                }
+                kept.push( lines[ i ] );
+            }
+            cleaned.push( kept.join( '\n' ) );
+        }
+
+        return { pages: cleaned, notes: notes };
+    }
+
+    /**
      * Render pages to sanitized HTML (E3S1 + E3S2T1).
      *
      * A page is rendered in a single call so the pinned renderer's per-page
      * state (variable definitions, heading ids) spans all of its columns; the
      * rendered columnSplit markers are then turned into column blocks.  The
      * `marked` fallback has no column support, so it renders each column from
-     * the source instead.
+     * the source instead.  Footnote markers that landed inside fenced code
+     * are restored to source text after sanitizing (E3S3 review).
      *
      * @param {Array.<string>} pages page sources
+     * @param {Object.<string, string>} footnoteNotes footnote bodies by label
      * @return {Array.<Array.<string>>|null} pages -> columns -> HTML
      */
-    function renderPages( pages ) {
+    function renderPages( pages, footnoteNotes ) {
         var renderedPages = [];
         var renderedColumns;
         var columns;
         var columnHtml;
+        var pageMarked;
         var html;
         var p;
         var c;
 
         for ( p = 0; p < pages.length; p++ ) {
-            html = renderMarkdown( pages[ p ], p );
+            pageMarked = markFootnoteRefs( pages[ p ], footnoteNotes );
+            html = renderMarkdown( pageMarked, p );
             if ( html === null ) {
                 return null;
             }
@@ -445,7 +579,7 @@
                 continue;
             }
 
-            columns = splitColumns( pages[ p ] );
+            columns = splitColumns( pageMarked );
             if ( columns.length === 1 ) {
                 renderedPages.push( [ html ] );
                 continue;
@@ -466,17 +600,176 @@
     }
 
     /**
+     * Footnote reference marker: `<span class="hbw-footnote-mark"
+     * data-hbw-footnote="label">` with no content.  The span survives the
+     * pinned renderer untouched (although DOMPurify drops the attribute), so
+     * references are resolved by walking the source references and the
+     * rendered marker spans side by side in document order.
+     *
+     * @type {RegExp}
+     */
+    var FOOTNOTE_MARKER = /<span class="hbw-footnote-mark"[^>]*><\/span>/g;
+
+    /**
+     * Replace defined footnote references in one page source with empty
+     * marker spans (E3S3T3).  Only references with a matching definition
+     * become markers; anything without one (including `[^nope]`) stays
+     * verbatim so readers see the source text instead of a broken link.
+     *
+     * Known limitation (E3B1, deferred to end of epic): a `[^label]` inside
+     * fenced or inline code still becomes a marker here, so code placed
+     * before prose can donate a note body to a later definition.  See
+     * https://trello.com/c/yOXKeyb2/175-e3b1-bug-footnote-refs-inside-code-link-to-the-wrong-note
+     *
+     * @param {string} pageSource page source
+     * @param {Object.<string, string>} notes footnote bodies by label
+     * @return {string} page source with markers
+     */
+    function markFootnoteRefs( pageSource, notes ) {
+        return String( pageSource ).replace( FOOTNOTE_REF, function ( whole, label ) {
+            if ( !notes.hasOwnProperty( label ) ) {
+                return whole;
+            }
+            return '<span class="hbw-footnote-mark" data-hbw-footnote="' +
+                label.replace( /&/g, '&amp;' ).replace( /"/g, '&quot;' ) +
+                '"></span>';
+        } );
+    }
+
+    /**
+     * Resolve footnote references inside one rendered page (E3S3T3).
+     *
+     * Each `[^label]` text reference in a column becomes a superscript link
+     * to that label's note; then the notes list for the page is appended
+     * below the columns, each note linking back to its first reference.
+     * References without a matching definition are left as plain text, and
+     * unused definitions are never emitted.
+     *
+     * The pinned renderer rewrites bracket text into its own spans, so this
+     * must run on the same extension first while `[^label]` text survives:
+     * each page is pre-scanned and every reference is replaced by a marker
+     * element before the renderer runs; the links are attached after.
+     *
+     * @param {string} pageSource page source with markers
+     * @param {HTMLElement} pageNode rendered page block
+     * @param {Object.<string, string>} notes footnote bodies by label
+     * @param {number} pageIndex zero-based page index; note and reference
+     *                          ids are scoped to the page so identical labels
+     *                          on different pages stay document-unique
+     * @return {void}
+     */
+    function linkFootnotes( pageSource, pageNode, notes, pageIndex ) {
+        var pageNumber = pageIndex + 1;
+        var order = [];
+        var seen = {};
+        var notesNode;
+        var listNode;
+        var itemNode;
+        var backLink;
+        var refLink;
+        var refIdUsed = {};
+        var markers;
+        var marker;
+        var label;
+        var i;
+
+        FOOTNOTE_REF.lastIndex = 0;
+        while ( ( marker = FOOTNOTE_REF.exec( pageSource ) ) !== null ) {
+            label = marker[ 1 ];
+            if ( !notes.hasOwnProperty( label ) || seen[ label ] ) {
+                continue;
+            }
+            seen[ label ] = true;
+            order.push( label );
+        }
+
+        // DOMPurify strips the `data-hbw-footnote` attribute but keeps the
+        // marker spans in place, so labels are matched by walking the source
+        // references and the rendered markers side by side in document order.
+        markers = [];
+        ( function collect( node ) {
+            var child;
+            for ( child = node.firstChild; child; child = child.nextSibling ) {
+                if ( child.nodeType !== 1 ) {
+                    continue;
+                }
+                if ( child.nodeName.toLowerCase() === 'span' &&
+                    ( ' ' + child.className + ' ' ).indexOf( ' hbw-footnote-mark ' ) !== -1 ) {
+                    markers.push( child );
+                }
+                collect( child );
+            }
+        }( pageNode ) );
+
+        FOOTNOTE_REF.lastIndex = 0;
+        i = 0;
+        while ( i < markers.length &&
+            ( marker = FOOTNOTE_REF.exec( pageSource ) ) !== null ) {
+            label = marker[ 1 ];
+            if ( !notes.hasOwnProperty( label ) ) {
+                continue;
+            }
+            refLink = document.createElement( 'a' );
+            refLink.setAttribute( 'href', '#hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
+            // No selector lookup: encoded labels can carry `.`, `(`, `)`
+            // and friends, which throw inside querySelector.  The first
+            // reference for a label on this page keeps the id.
+            if ( !Object.prototype.hasOwnProperty.call( refIdUsed, label ) ) {
+                refIdUsed[ label ] = true;
+                refLink.setAttribute( 'id', 'hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
+            }
+            refLink.className = FOOTNOTE_REF_CLASS;
+            refLink.appendChild( document.createTextNode( '[' + label + ']' ) );
+            markers[ i ].parentNode.replaceChild( refLink, markers[ i ] );
+            i++;
+        }
+
+        if ( !order.length ) {
+            return;
+        }
+
+        notesNode = document.createElement( 'div' );
+        notesNode.className = FOOTNOTE_NOTES_CLASS;
+        listNode = document.createElement( 'ol' );
+        listNode.className = FOOTNOTE_LIST_CLASS;
+        notesNode.appendChild( listNode );
+
+        for ( i = 0; i < order.length; i++ ) {
+            label = order[ i ];
+            itemNode = document.createElement( 'li' );
+            itemNode.setAttribute( 'id', 'hbw-fn-' + pageNumber + '-' + encodeURIComponent( label ) );
+            itemNode.className = FOOTNOTE_ITEM_CLASS;
+            itemNode.innerHTML = renderMarkdown( notes[ label ], 0 ) || '';
+            backLink = document.createElement( 'a' );
+            backLink.setAttribute( 'href', '#hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
+            backLink.className = FOOTNOTE_BACK_CLASS;
+            backLink.setAttribute( 'aria-label', 'Back to reference' );
+            backLink.appendChild( document.createTextNode( '\u21A9' ) );
+            itemNode.appendChild( document.createTextNode( ' ' ) );
+            itemNode.appendChild( backLink );
+            listNode.appendChild( itemNode );
+        }
+
+        pageNode.appendChild( notesNode );
+    }
+
+    /**
      * Build the rendered container with one page block per brew page (E3S1).
      * Each page block holds one column block per `\column` segment, in
-     * document order.
+     * document order; E3S3 footnotes and page numbers hang below the last
+     * column of the page they belong to.
      *
-     * @param {Array.<Array.<string>>} renderedPages pages -> columns -> HTML
+     * @param {Array.<Array.<string>>}   renderedPages pages -> columns -> HTML
+     * @param {Array.<string>}           pageSources   page sources (marker
+     *                                   order for the notes)
+     * @param {Object.<string, string>}  notes         footnote bodies by label
      * @return {HTMLElement}
      */
-    function buildRendered( renderedPages ) {
+    function buildRendered( renderedPages, pageSources, notes ) {
         var container = document.createElement( 'div' );
         var pageNode;
         var columnNode;
+        var footerNode;
         var p;
         var c;
 
@@ -498,6 +791,14 @@
                 columnNode.innerHTML = renderedPages[ p ][ c ];
                 pageNode.appendChild( columnNode );
             }
+
+            linkFootnotes( pageSources[ p ], pageNode, notes, p );
+
+            // Page footer: computed page number (E3S3T2).
+            footerNode = document.createElement( 'div' );
+            footerNode.className = PAGE_FOOTER_CLASS;
+            footerNode.appendChild( document.createTextNode( String( p + 1 ) ) );
+            pageNode.appendChild( footerNode );
 
             container.appendChild( pageNode );
         }
@@ -522,18 +823,24 @@
 
         var text = source.textContent || source.innerText || '';
         var renderedPages = null;
+        var pageSources = null;
+        var footnoteData = null;
         var rendered = null;
 
         activeRenderer = null;
 
         try {
-            renderedPages = renderPages( splitPages( text ) );
+            pageSources = splitPages( text );
+            footnoteData = extractFootnotes( pageSources );
+            renderedPages = renderPages( footnoteData.pages, footnoteData.notes );
         } catch ( e ) {
             renderedPages = null;
         }
 
         if ( renderedPages !== null ) {
-            rendered = buildRendered( renderedPages );
+            rendered = buildRendered(
+                renderedPages, footnoteData.pages, footnoteData.notes
+            );
             host.appendChild( rendered );
         } else {
             // Degraded path: never hide the reader's content because the
