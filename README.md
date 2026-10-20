@@ -92,8 +92,29 @@ npm install
 npm test
 ```
 
+Theme build and assets (E3.5S2). The compiled upstream theme
+(`vendor/homebrewery-3.21.0/theme/theme.css`) and its SHA-256 manifest are
+committed. The font/texture binaries are **not** committed because the 5e
+fonts and textures are unlicensed in the pinned tag; install them on the wiki
+host instead:
+
+```sh
+sh build/theme/fetch-assets.sh   # downloads the pinned tag, verifies hashes
+```
+
+The build itself (`sh build/theme/build.sh`) fetches `naturalcrit/homebrewery`
+v3.21.0, compiles `themes/V3/Blank/style.less` then
+`themes/V3/5ePHB/style.less`, and rewrites `/assets`, `/fonts/iconFonts` and
+`../../../fonts` URLs to be **relative to `theme.css`** (`./themes/...`). That
+keeps the committed stylesheet working under any `$wgScriptPath`, including a
+subdirectory install such as `/wiki`. `HBW_ASSET_BASE` overrides the prefix
+when the assets are served from another origin or directory; rebuild after
+changing it. To use an admin-supplied theme directory instead, set
+`$wgHomebreweryWikiThemeCss` in `LocalSettings.php`. Never hotlink Homebrewery.
+
 Visual regression for the reference brew (headless Chromium; needs the browser
-once — `npx playwright install --with-deps chromium`):
+once — `npx playwright install --with-deps chromium`). Run
+`fetch-assets.sh` first so the theme fonts and textures are present:
 ```sh
 npm run visual          # compare against tests/visual/baselines/
 npm run visual:update   # rewrite baselines deliberately, then review the PNG

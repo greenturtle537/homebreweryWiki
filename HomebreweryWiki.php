@@ -43,7 +43,9 @@ define( 'HOMEBREWERYWIKI_THEME_CSS', '/extensions/HomebreweryWiki/HomebreweryWik
 /**
  * Compiled theme CSS loaded inside the iframe (E3.5S2).  NULL uses the
  * vendored build artifact; set it in LocalSettings.php to an admin-supplied
- * theme directory when the bundled assets are not licence-cleared.
+ * theme directory when the bundled assets are not licence-cleared.  The URL
+ * must be same-origin: the shell CSP allows only 'self' styles and fonts, so
+ * an off-origin URL is blocked silently and the brew renders untitled.
  */
 $wgHomebreweryWikiThemeCss = null;
 
@@ -173,6 +175,13 @@ $wgHooks['ArticleFromTitle'][] = 'HomebreweryWiki::onArticleFromTitle';
  * side is guarded in HomebreweryWiki_Article::getBrewText().
  */
 $wgHooks['ArticleSave'][] = 'HomebreweryWiki::onArticleSave';
+
+/**
+ * Wiki link/category registration for brew pages (E3.5S3T4). Brew views skip
+ * the wikitext parser, so the link tables are updated from the source tokens
+ * on save instead.
+ */
+$wgHooks['ArticleSaveComplete'][] = 'HomebreweryWiki::onArticleSaveComplete';
 
 /**
  * Brew pane display (E1S2 placeholder + E1S3 rendered HTML).

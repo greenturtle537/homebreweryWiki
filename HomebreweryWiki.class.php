@@ -188,6 +188,58 @@ class HomebreweryWiki {
     }
 
     /**
+     * ArticleSaveComplete hook (E3.5S3T4).  Brew views skip the wikitext
+     * parser, so `pagelinks` / `categorylinks` would never be updated.  Build
+     * the link set from the source tokens and run LinksUpdate, which makes
+     * Special:WhatLinksHere and category pages work without touching the
+     * stored markdown.
+     *
+     * MediaWiki 1.14 signature (ArticleSaveComplete):
+     *   ( &$article, &$user, $text, $summary, $minoredit, $watchthis,
+     *     $sectionanchor, &$flags, $revision, &$status, $baseRevId )
+     *
+     * @return bool Always true.
+     */
+    public static function onArticleSaveComplete( &$article, &$user, $text, $summary,
+        $minoredit, $watchthis, $sectionanchor, &$flags, $revision, &$status ) {
+        if ( !( $article instanceof Article ) ||
+             $article->getTitle()->getNamespace() !== NS_MANUAL ) {
+            return true;
+        }
+        if ( !is_string( $text ) || !class_exists( 'ParserOutput' ) ||
+             !class_exists( 'LinksUpdate' ) ) {
+            return true;
+        }
+
+        $output = new ParserOutput();
+
+        foreach ( self::brewLinkTargets( $text ) as $target ) {
+            $title = Title::newFromText( $target );
+            if ( $title instanceof Title && $title->getNamespace() !== NS_MEDIA ) {
+                $output->addLink( $title );
+            }
+        }
+        foreach ( self::brewCategoryNames( $text ) as $category ) {
+            $key = self::categoryDbKey( $category );
+            if ( $key !== null && $key !== '' ) {
+                $output->addCategory( $key, '' );
+            }
+        }
+        // Embedded files belong in imagelinks (file usage / Special:UnusedFiles),
+        // matching what the wikitext parser records for `[[File:...]]`.
+        foreach ( array_keys( self::brewFileMap( $text ) ) as $name ) {
+            $fileTitle = Title::makeTitleSafe( NS_FILE, $name );
+            if ( $fileTitle instanceof Title ) {
+                $output->addImage( $fileTitle->getDBkey() );
+            }
+        }
+
+        $update = new LinksUpdate( $article->getTitle(), $output, false );
+        $update->doUpdate();
+        return true;
+    }
+
+    /**
      * Whether $text is safe to treat as brew source (E1S1T7): a string that is
      * empty or valid UTF-8.
      *
@@ -327,6 +379,224 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Brew source with code spans and fenced blocks removed.
+	 *
+	 * Source tokens are extracted from prose only, matching the renderer:
+	 * `[[...]]` inside inline code or a fence stays literal on the page, so
+	 * it must not register a category, a link or a file (E3.5S3T4).
+	 *
+	 * Fences close only on a line that uses the same marker character, has a
+	 * marker run at least as long as the opener, and has nothing but
+	 * whitespace after the run. Inline code spans match CommonMark: the
+	 * closing run must be the same length as the opening run.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return string Prose text, one entry per line.
+	 */
+	public static function brewProseText( $text ) {
+		if ( !is_string( $text ) ) {
+			return '';
+		}
+		$out = array();
+		$fenceChar = '';
+		$fenceLength = 0;
+		$lines = preg_split( "/\r\n|\n|\r/", $text );
+		foreach ( $lines as $line ) {
+			if ( $fenceChar !== '' ) {
+				$close = '/^ {0,3}' . preg_quote( $fenceChar, '/' ) .
+					'{' . $fenceLength . ',}[ \t]*$/';
+				if ( preg_match( $close, $line ) ) {
+					$fenceChar = '';
+					$fenceLength = 0;
+				}
+				continue;
+			}
+			if ( preg_match( '/^ {0,3}(`{3,}|~{3,})/', $line, $m ) ) {
+				$fenceChar = substr( $m[1], 0, 1 );
+				$fenceLength = strlen( $m[1] );
+				continue;
+			}
+			$out[] = self::stripInlineCode( $line );
+		}
+		return implode( "\n", $out );
+	}
+
+	/**
+	 * Remove inline code spans from one prose line (E3.5S3T4).
+	 *
+	 * Mirrors the renderer's maskInlineCode(): a run of N backticks closes
+	 * only on the next run of exactly N backticks; an unmatched opener stays
+	 * literal prose.
+	 *
+	 * @param string $line One source line.
+	 * @return string Line without code spans.
+	 */
+	protected static function stripInlineCode( $line ) {
+		$out = '';
+		$len = strlen( $line );
+		$i = 0;
+		while ( $i < $len ) {
+			if ( $line[$i] !== '`' ) {
+				$out .= $line[$i];
+				$i++;
+				continue;
+			}
+			$open = $i;
+			while ( $i < $len && $line[$i] === '`' ) {
+				$i++;
+			}
+			$run = $i - $open;
+			$close = -1;
+			$j = $i;
+			while ( $j < $len ) {
+				if ( $line[$j] !== '`' ) {
+					$j++;
+					continue;
+				}
+				$k = $j;
+				while ( $k < $len && $line[$k] === '`' ) {
+					$k++;
+				}
+				if ( ( $k - $j ) === $run ) {
+					$close = $k;
+					break;
+				}
+				$j = $k;
+			}
+			if ( $close === -1 ) {
+				$out .= substr( $line, $open, $i - $open );
+			} else {
+				$i = $close;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Category names declared in brew source (E3.5S3T4).
+	 *
+	 * `[[Category:Name]]` / `[[Category:Name|sort]]` are source-level tokens:
+	 * the renderer never sees them, and the page is registered under each
+	 * category through OutputPage (view) and LinksUpdate (save). Tokens in
+	 * code spans and fences are ignored (brewProseText).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array Unique category names, in source order.
+	 */
+	public static function brewCategoryNames( $text ) {
+		$names = array();
+		if ( !is_string( $text ) ) {
+			return $names;
+		}
+		$text = self::brewProseText( $text );
+		if ( preg_match_all( '/\[\[Category:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
+			foreach ( $m[1] as $name ) {
+				$name = trim( $name );
+				if ( $name !== '' && !isset( $names[$name] ) ) {
+					$names[$name] = true;
+				}
+			}
+		}
+		return array_keys( $names );
+	}
+
+	/**
+	 * Database key for a category name (E3.5S3T4).
+	 *
+	 * `categorylinks.cl_to` and OutputPage::addCategoryLinks() use the
+	 * namespace-less page_title form (underscores), not the display name.
+	 *
+	 * @param string $name Category display name.
+	 * @return string|null DB key, or null when the title is invalid.
+	 */
+	public static function categoryDbKey( $name ) {
+		$name = trim( $name );
+		if ( class_exists( 'Title' ) ) {
+			$title = Title::makeTitleSafe( NS_CATEGORY, $name );
+			if ( $title instanceof Title ) {
+				return $title->getDBkey();
+			}
+			// MediaWiki rejected the name (invalid characters, empty after
+			// normalisation); do not invent a key the parser would refuse.
+			return null;
+		}
+		return str_replace( ' ', '_', $name );
+	}
+
+	/**
+	 * Wiki-link targets declared in brew source (E3.5S3T4).
+	 *
+	 * Excludes `[[Category:...]]` and `[[File:...]]`, which register through
+	 * the category and image paths instead. Tokens in code spans and fences
+	 * are ignored (brewProseText).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array Unique target titles, in source order.
+	 */
+	public static function brewLinkTargets( $text ) {
+		$targets = array();
+		if ( !is_string( $text ) ) {
+			return $targets;
+		}
+		$text = self::brewProseText( $text );
+		if ( preg_match_all( '/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/', $text, $m ) ) {
+			foreach ( $m[1] as $target ) {
+				$target = trim( $target );
+				if ( $target === '' ) {
+					continue;
+				}
+				if ( preg_match( '/^(Category|File):/i', $target ) ) {
+					continue;
+				}
+				if ( !isset( $targets[$target] ) ) {
+					$targets[$target] = true;
+				}
+			}
+		}
+		return array_keys( $targets );
+	}
+
+	/**
+	 * Resolve `[[File:...]]` tokens to same-origin upload URLs (E3.5S3T3).
+	 *
+	 * The client cannot derive MediaWiki's hashed upload paths, so the server
+	 * resolves each referenced file once and hands the render module a map.
+	 * Missing files are reported as `exists => false` so the module can render
+	 * a visible placeholder instead of a broken image (D2). Tokens in code
+	 * spans and fences are ignored (brewProseText).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array File name => array( 'url' => string, 'exists' => bool ).
+	 */
+	public static function brewFileMap( $text ) {
+		$map = array();
+		if ( !is_string( $text ) ) {
+			return $map;
+		}
+		$text = self::brewProseText( $text );
+		if ( !preg_match_all( '/\[\[File:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
+			return $map;
+		}
+		foreach ( $m[1] as $name ) {
+			$name = trim( $name );
+			if ( $name === '' || isset( $map[$name] ) ) {
+				continue;
+			}
+			$url = '';
+			$exists = false;
+			if ( class_exists( 'Image' ) ) {
+				$image = Image::newFromName( $name );
+				if ( $image && $image->exists() ) {
+					$url = $image->getURL();
+					$exists = ( $url !== '' );
+				}
+			}
+			$map[$name] = array( 'url' => $url, 'exists' => $exists );
+		}
+		return $map;
+	}
+
+	/**
 	 * URL of the static iframe shell document (E3.5S1).
 	 *
 	 * The shell is a plain static file served by the web server; the parent
@@ -343,8 +613,9 @@ class HomebreweryWiki {
 	/**
 	 * URL of the compiled upstream theme CSS loaded inside the iframe
 	 * (E3.5S2). Override $wgHomebreweryWikiThemeCss in LocalSettings.php to
-	 * point at an admin-supplied theme directory; the default is the vendored
-	 * build artifact.
+	 * point at an admin-supplied theme directory on the wiki's own origin
+	 * (the shell CSP allows only 'self' styles and fonts); the default is the
+	 * vendored build artifact.
 	 *
 	 * @return string
 	 */
@@ -582,8 +853,52 @@ class HomebreweryWiki {
         $pcache     = false;
 
         global $wgOut, $wgRequest;
-        $wgOut->addHTML( self::brewPlaceholder( $article->getBrewText(), self::isPrintRequest( $wgRequest ) ) );
+        $text = $article->getBrewText();
+        $wgOut->addHTML( self::brewPlaceholder( $text, self::isPrintRequest( $wgRequest ) ) );
+
+        // E3.5S3T4: categories come from source tokens, not the wikitext
+        // parser (brew views skip it). Register them for the skin footer.
+        $categories = self::brewCategoryNames( $text );
+        $categoryLinks = array();
+        foreach ( $categories as $category ) {
+            $key = self::categoryDbKey( $category );
+            if ( $key !== null && $key !== '' ) {
+                $categoryLinks[$key] = 'normal';
+            }
+        }
+        if ( count( $categoryLinks ) ) {
+            $wgOut->addCategoryLinks( $categoryLinks );
+        }
         return true;
+    }
+
+    /**
+     * Base URL for wiki links inside a brew (E3.5S3T2).
+     *
+     * Uses index.php?title= because it works for both pretty and ugly URLs on
+     * MediaWiki 1.14. The render module appends an encoded title and marks
+     * the anchor `target="_top"` so a click navigates the parent page.
+     *
+     * @return string
+     */
+    public static function wikiBaseUrl() {
+        global $wgScriptPath;
+        return $wgScriptPath . '/index.php?title=';
+    }
+
+    /**
+     * JSON file map for the render module (E3.5S3T3).
+     *
+     * @param mixed $text Raw brew markdown.
+     * @return string JSON object, safe to place in an HTML attribute.
+     */
+    public static function brewFileMapJson( $text ) {
+        $map = self::brewFileMap( $text );
+        if ( !function_exists( 'json_encode' ) ) {
+            return '{}';
+        }
+        $json = json_encode( $map );
+        return ( $json === false ) ? '{}' : $json;
     }
 
     /**
@@ -614,7 +929,9 @@ class HomebreweryWiki {
         $attrs = ' data-hbw-shell="' . htmlspecialchars( self::shellUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
                . ' data-hbw-theme="' . htmlspecialchars( self::themeCssUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
                . ' data-hbw-page-width="215.9"'
-               . ' data-hbw-page-height="279.4"';
+               . ' data-hbw-page-height="279.4"'
+               . ' data-hbw-wiki-base="' . htmlspecialchars( self::wikiBaseUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
+               . ' data-hbw-files="' . htmlspecialchars( self::brewFileMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"';
         if ( $print ) {
             $attrs .= ' data-hbw-print="1"';
         }

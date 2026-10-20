@@ -6,7 +6,9 @@
     "test": "node tests/render.test.js",
     "test:mw": "sh tests/mw/run.sh",
     "visual": "node tests/visual/render-baseline.js",
-    "visual:update": "node tests/visual/render-baseline.js --update"
+    "visual:update": "node tests/visual/render-baseline.js --update",
+    "parity": "node tests/parity/check.mjs",
+    "parity:capture": "node tests/parity/capture-goldens.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.1.3",

@@ -1,0 +1,12 @@
+{
+  "name": "hbw-homebrewery-theme-build",
+  "private": true,
+  "description": "Compiles the pinned Homebrewery v3.21.0 Blank + 5ePHB theme (E3.5S2)",
+  "type": "commonjs",
+  "scripts": {
+    "build": "sh ./build.sh"
+  },
+  "devDependencies": {
+    "less": "4.2.0"
+  }
+}
