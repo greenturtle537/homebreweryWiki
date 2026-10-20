@@ -98,7 +98,12 @@
             // fetch external URLs without going through the img check.
             'svg'
         ],
-        FORBID_ATTR: [ 'srcdoc', 'formaction', 'poster', 'srcset', 'background' ],
+        // `ping` fires an outbound request on click, and `dynsrc` / `lowsrc`
+        // are legacy media pointers that still load in some engines.
+        FORBID_ATTR: [
+            'srcdoc', 'formaction', 'poster', 'srcset', 'background',
+            'ping', 'dynsrc', 'lowsrc'
+        ],
         ALLOW_DATA_ATTR: false
     };
 
