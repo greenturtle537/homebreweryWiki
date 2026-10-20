@@ -92,8 +92,30 @@ npm install
 npm test
 ```
 
+Theme build and assets (E3.5S2). The compiled upstream theme
+(`vendor/homebrewery-3.21.0/theme/theme.css`) and its SHA-256 manifest are
+committed. The font/texture binaries are **not** committed because the 5e
+fonts and textures are unlicensed in the pinned tag; install them on the wiki
+host instead:
+
+```sh
+sh build/theme/fetch-assets.sh   # downloads the pinned tag, verifies hashes
+```
+
+The build itself (`sh build/theme/build.sh`) fetches `naturalcrit/homebrewery`
+v3.21.0, compiles `themes/V3/Blank/style.less` then
+`themes/V3/5ePHB/style.less`, and rewrites `/assets`, `/fonts/iconFonts` and
+`../../../fonts` URLs to be **relative to `theme.css`** (`./themes/...`). That
+keeps the committed stylesheet working under any `$wgScriptPath`, including a
+subdirectory install such as `/wiki`. `HBW_ASSET_BASE` overrides the prefix
+when the assets are served from another directory on the same origin (the shell
+CSP only allows same-origin fonts, images and styles); rebuild after changing
+it. To use an admin-supplied theme directory instead, set
+`$wgHomebreweryWikiThemeCss` in `LocalSettings.php`. Never hotlink Homebrewery.
+
 Visual regression for the reference brew (headless Chromium; needs the browser
-once — `npx playwright install --with-deps chromium`):
+once — `npx playwright install --with-deps chromium`). Run
+`fetch-assets.sh` first so the theme fonts and textures are present:
 ```sh
 npm run visual          # compare against tests/visual/baselines/
 npm run visual:update   # rewrite baselines deliberately, then review the PNG
@@ -106,3 +128,11 @@ There is no build step for the extension itself: the front-end assets
 (`HomebreweryWiki.render.js` plus `vendor/`) are plain static files served by
 the web server, in the load order declared by
 `HomebreweryWiki::rendererAssets()`.
+
+The brew itself renders inside `HomebreweryWiki.shell.html`, a static
+same-origin iframe served from the extension directory. The parent renders and
+sanitizes the markdown, then injects the upstream page DOM
+(`.brewRenderer > .pages > .page > .columnWrapper`) into the frame; the frame
+runs no scripts (`sandbox="allow-same-origin
+allow-top-navigation-by-user-activation"`). The compiled theme stylesheet is
+loaded inside the frame, never in the wiki document.

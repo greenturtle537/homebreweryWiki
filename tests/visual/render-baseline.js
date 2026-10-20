@@ -36,6 +36,9 @@ var VIEWPORT = { width: 1280, height: 1024 };
 var PIXEL_THRESHOLD = 0.1;
 var MAX_DIFF_RATIO = 0.01;
 
+/* The harness serves the real shell and compiled theme over a fake
+ * same-origin host, so geometry, fonts and assets are the production path. */
+
 var pass = 0;
 var fail = 0;
 
@@ -153,69 +156,138 @@ async function checkFixture( browser, fixture, name ) {
         }
     } );
 
-    await page.setContent(
-        '<!doctype html><html><head><meta charset="utf-8"></head><body>' +
-        '<div id="content"><div class="hbw-brew" id="hbw-brew">' +
+    var harnessHtml =
+        '<!doctype html><html><head><meta charset="utf-8">' +
+        '<link rel="stylesheet" href="/extensions/HomebreweryWiki/HomebreweryWiki.theme.css">' +
+        '</head><body>' +
+        '<div id="content"><div class="hbw-brew" id="hbw-brew"' +
+        ' data-hbw-shell="/extensions/HomebreweryWiki/HomebreweryWiki.shell.html"' +
+        ' data-hbw-theme="/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme/theme.css"' +
+        ' data-hbw-page-width="215.9" data-hbw-page-height="279.4">' +
         '<div class="hbw-source" id="hbw-source" style="display:none">' + escaped + '</div>' +
         '<noscript><pre class="hbw-brew-text">\n' + escaped + '</pre></noscript>' +
-        '</div></div></body></html>',
-        { waitUntil: 'load' }
-    );
+        '</div></div></body></html>';
 
-    await page.addStyleTag( { content: asset( 'HomebreweryWiki.theme.css' ) } );
+    // Serve the repository under a fake same-origin host so the shell URL, the
+    // compiled theme and its font/texture URLs all resolve exactly as they do
+    // on a wiki install. No network access is used.
+    await page.route( 'http://hbw.test/**', function ( route ) {
+        var url = new URL( route.request().url() );
+        var rel;
+        var file;
+        var types = {
+            '.html': 'text/html',
+            '.css': 'text/css',
+            '.js': 'application/javascript',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf': 'font/ttf'
+        };
+        if ( url.pathname === '/harness.html' ) {
+            return route.fulfill( { status: 200, contentType: 'text/html', body: harnessHtml } );
+        }
+        rel = decodeURIComponent( url.pathname.replace( /^\/extensions\/HomebreweryWiki\//, '' ) );
+        file = path.join( root, rel );
+        if ( file.indexOf( root ) !== 0 || !fs.existsSync( file ) || fs.statSync( file ).isDirectory() ) {
+            return route.fulfill( { status: 404, body: '' } );
+        }
+        return route.fulfill( {
+            status: 200,
+            contentType: types[ path.extname( file ).toLowerCase() ] || 'application/octet-stream',
+            path: file
+        } );
+    } );
+
+    await page.goto( 'http://hbw.test/harness.html', { waitUntil: 'load' } );
+
     await page.addScriptTag( { content: asset( 'vendor/marked-0.3.19.min.js' ) } );
     await page.addScriptTag( { content: asset( 'vendor/dompurify-2.5.8.min.js' ) } );
     await page.addScriptTag( { content: asset( 'vendor/homebrewery-3.21.0/renderer.min.js' ) } );
     await page.addScriptTag( { content: asset( 'HomebreweryWiki.render.js' ) } );
-    await page.evaluate( function () {
-        document.dispatchEvent( new Event( 'DOMContentLoaded', { bubbles: true } ) );
+
+    await page.waitForFunction( function () {
+        var frame = document.getElementById( 'hbw-frame' );
+        var doc = frame && frame.contentDocument;
+        var page = doc && doc.querySelector( '.pages > .page' );
+        // Wait for the compiled theme to apply, not just for the page nodes:
+        // letter geometry is a theme rule, so an early read would measure the
+        // unstyled content height.
+        return !!page && page.offsetWidth >= 800 && page.offsetHeight >= 1000;
+    }, { timeout: 15000 } );
+
+    // Let the theme fonts settle before the screenshot.
+    await page.evaluate( async function () {
+        var frame = document.getElementById( 'hbw-frame' );
+        if ( frame && frame.contentDocument && frame.contentDocument.fonts ) {
+            await frame.contentDocument.fonts.ready;
+        }
     } );
 
     var stats = await page.evaluate( function () {
-        var rendered = document.getElementById( 'hbw-brew-rendered' );
-        if ( !rendered ) {
+        var host = document.getElementById( 'hbw-brew' );
+        var frame = document.getElementById( 'hbw-frame' );
+        var doc = frame && frame.contentDocument;
+        var pages;
+        var numbers;
+        if ( !host || !doc ) {
             return null;
         }
-        var pages = Array.prototype.slice.call( rendered.querySelectorAll( '.hbw-page' ) );
-        var footers = Array.prototype.slice.call(
-            rendered.querySelectorAll( '.hbw-page-footer' )
+        pages = Array.prototype.slice.call(
+            doc.querySelectorAll( '.pages > .page' )
+        );
+        numbers = Array.prototype.slice.call(
+            doc.querySelectorAll( '.pages > .page > .pageNumber' )
         );
         return {
+            render: host.getAttribute( 'data-hbw-render' ),
+            reportedPages: host.getAttribute( 'data-hbw-pages' ),
             pages: pages.length,
-            widths: pages.map( function ( p ) {
-                return Math.round( p.getBoundingClientRect().width );
-            } ),
-            footers: footers.map( function ( f ) {
-                return f.textContent.trim();
-            } ),
-            scrollWidth: document.documentElement.scrollWidth,
-            viewport: window.innerWidth,
-            height: Math.round( rendered.getBoundingClientRect().height )
+            numbers: numbers.length,
+            // offsetWidth/Height are layout sizes: unaffected by the pane-fit
+            // transform, so they assert the true letter page box.
+            widths: pages.map( function ( p ) { return p.offsetWidth; } ),
+            heights: pages.map( function ( p ) { return p.offsetHeight; } ),
+            scrollWidth: doc.documentElement.scrollWidth,
+            viewport: doc.documentElement.clientWidth,
+            themeLinks: Array.prototype.slice.call(
+                doc.querySelectorAll( 'link[rel="stylesheet"]' )
+            ).map( function ( l ) { return l.getAttribute( 'href' ); } )
         };
     } );
 
-    ok( !!stats, 'visual ' + name + ': rendered' );
+    ok( !!stats, 'visual ' + name + ': rendered inside the iframe' );
     if ( !stats ) {
         await page.close();
         return;
     }
 
-    ok( stats.pages === 3, 'visual ' + name + ': three page blocks' );
-    // Fixed letter-page geometry is E5S2's job; at E3 every page fills the
-    // pane and all pages share one width.
+    ok( stats.render === 'html', 'visual ' + name + ': host reports html' );
+    ok( stats.reportedPages === '3',
+        'visual ' + name + ': host reports three pages' );
+    ok( stats.pages === 3, 'visual ' + name + ': iframe .pages holds three .page blocks' );
+    ok( stats.numbers === 3, 'visual ' + name + ': one .pageNumber per page' );
+    ok( stats.themeLinks.some( function ( href ) {
+        return /vendor\/homebrewery-3\.21\.0\/theme\/theme\.css$/.test( href || '' );
+    } ), 'visual ' + name + ': compiled upstream theme is linked inside the iframe' );
     ok( stats.widths.every( function ( w ) {
-        return w === stats.widths[ 0 ] && w > 600;
-    } ), 'visual ' + name + ': pages share a pane-filling width (' +
+        return Math.abs( w - 816 ) <= 1;
+    } ), 'visual ' + name + ': pages are 215.9mm wide (' +
         stats.widths.join( ',' ) + ')' );
-    ok( stats.footers.join( ',' ) === '1,2,3',
-        'visual ' + name + ': page numbers visible (' + stats.footers.join( ',' ) + ')' );
+    ok( stats.heights.every( function ( h ) {
+        return Math.abs( h - 1056 ) <= 1;
+    } ), 'visual ' + name + ': pages are 279.4mm tall (' +
+        stats.heights.join( ',' ) + ')' );
     ok( stats.scrollWidth <= stats.viewport,
         'visual ' + name + ': no horizontal overflow (' + stats.scrollWidth +
         ' <= ' + stats.viewport + ')' );
     ok( errors.length === 0, 'visual ' + name + ': no console errors (' +
         errors.join( ' | ' ) + ')' );
 
-    var shot = await page.locator( '#hbw-brew-rendered' ).screenshot();
+    var shot = await page.locator( '#hbw-brew' ).screenshot();
     comparePixels( shot, name );
 
     await page.close();
