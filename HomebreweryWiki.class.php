@@ -220,7 +220,10 @@ class HomebreweryWiki {
             }
         }
         foreach ( self::brewCategoryNames( $text ) as $category ) {
-            $output->addCategory( self::categoryDbKey( $category ), '' );
+            $key = self::categoryDbKey( $category );
+            if ( $key !== null && $key !== '' ) {
+                $output->addCategory( $key, '' );
+            }
         }
         // 1.14 images are registered as links too, so `[[File:...]]` shows up
         // in the file's "what links here".
@@ -376,20 +379,116 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Brew source with code spans and fenced blocks removed.
+	 *
+	 * Source tokens are extracted from prose only, matching the renderer:
+	 * `[[...]]` inside inline code or a fence stays literal on the page, so
+	 * it must not register a category, a link or a file (E3.5S3T4).
+	 *
+	 * Fences close only on a line that uses the same marker character, has a
+	 * marker run at least as long as the opener, and has nothing but
+	 * whitespace after the run. Inline code spans match CommonMark: the
+	 * closing run must be the same length as the opening run.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return string Prose text, one entry per line.
+	 */
+	public static function brewProseText( $text ) {
+		if ( !is_string( $text ) ) {
+			return '';
+		}
+		$out = array();
+		$fenceChar = '';
+		$fenceLength = 0;
+		$lines = preg_split( "/\r\n|\n|\r/", $text );
+		foreach ( $lines as $line ) {
+			if ( $fenceChar !== '' ) {
+				$close = '/^ {0,3}' . preg_quote( $fenceChar, '/' ) .
+					'{' . $fenceLength . ',}[ \t]*$/';
+				if ( preg_match( $close, $line ) ) {
+					$fenceChar = '';
+					$fenceLength = 0;
+				}
+				continue;
+			}
+			if ( preg_match( '/^ {0,3}(`{3,}|~{3,})/', $line, $m ) ) {
+				$fenceChar = substr( $m[1], 0, 1 );
+				$fenceLength = strlen( $m[1] );
+				continue;
+			}
+			$out[] = self::stripInlineCode( $line );
+		}
+		return implode( "\n", $out );
+	}
+
+	/**
+	 * Remove inline code spans from one prose line (E3.5S3T4).
+	 *
+	 * Mirrors the renderer's maskInlineCode(): a run of N backticks closes
+	 * only on the next run of exactly N backticks; an unmatched opener stays
+	 * literal prose.
+	 *
+	 * @param string $line One source line.
+	 * @return string Line without code spans.
+	 */
+	protected static function stripInlineCode( $line ) {
+		$out = '';
+		$len = strlen( $line );
+		$i = 0;
+		while ( $i < $len ) {
+			if ( $line[$i] !== '`' ) {
+				$out .= $line[$i];
+				$i++;
+				continue;
+			}
+			$open = $i;
+			while ( $i < $len && $line[$i] === '`' ) {
+				$i++;
+			}
+			$run = $i - $open;
+			$close = -1;
+			$j = $i;
+			while ( $j < $len ) {
+				if ( $line[$j] !== '`' ) {
+					$j++;
+					continue;
+				}
+				$k = $j;
+				while ( $k < $len && $line[$k] === '`' ) {
+					$k++;
+				}
+				if ( ( $k - $j ) === $run ) {
+					$close = $k;
+					break;
+				}
+				$j = $k;
+			}
+			if ( $close === -1 ) {
+				$out .= substr( $line, $open, $i - $open );
+			} else {
+				$i = $close;
+			}
+		}
+		return $out;
+	}
+
+	/**
 	 * Category names declared in brew source (E3.5S3T4).
 	 *
 	 * `[[Category:Name]]` / `[[Category:Name|sort]]` are source-level tokens:
 	 * the renderer never sees them, and the page is registered under each
-	 * category through OutputPage (view) and LinksUpdate (save).
+	 * category through OutputPage (view) and LinksUpdate (save). Tokens in
+	 * code spans and fences are ignored (brewProseText).
 	 *
 	 * @param mixed $text Raw brew markdown.
-	 * @return array Unique category DB keys, in source order.
+	 * @return array Unique category names, in source order.
 	 */
 	public static function brewCategoryNames( $text ) {
 		$names = array();
 		if ( !is_string( $text ) ) {
 			return $names;
 		}
+		$text = self::brewProseText( $text );
 		if ( preg_match_all( '/\[\[Category:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
 			foreach ( $m[1] as $name ) {
 				$name = trim( $name );
@@ -408,7 +507,7 @@ class HomebreweryWiki {
 	 * namespace-less page_title form (underscores), not the display name.
 	 *
 	 * @param string $name Category display name.
-	 * @return string
+	 * @return string|null DB key, or null when the title is invalid.
 	 */
 	public static function categoryDbKey( $name ) {
 		$name = trim( $name );
@@ -417,6 +516,9 @@ class HomebreweryWiki {
 			if ( $title instanceof Title ) {
 				return $title->getDBkey();
 			}
+			// MediaWiki rejected the name (invalid characters, empty after
+			// normalisation); do not invent a key the parser would refuse.
+			return null;
 		}
 		return str_replace( ' ', '_', $name );
 	}
@@ -425,7 +527,8 @@ class HomebreweryWiki {
 	 * Wiki-link targets declared in brew source (E3.5S3T4).
 	 *
 	 * Excludes `[[Category:...]]` and `[[File:...]]`, which register through
-	 * the category and image paths instead.
+	 * the category and image paths instead. Tokens in code spans and fences
+	 * are ignored (brewProseText).
 	 *
 	 * @param mixed $text Raw brew markdown.
 	 * @return array Unique target titles, in source order.
@@ -435,6 +538,7 @@ class HomebreweryWiki {
 		if ( !is_string( $text ) ) {
 			return $targets;
 		}
+		$text = self::brewProseText( $text );
 		if ( preg_match_all( '/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/', $text, $m ) ) {
 			foreach ( $m[1] as $target ) {
 				$target = trim( $target );
@@ -458,7 +562,8 @@ class HomebreweryWiki {
 	 * The client cannot derive MediaWiki's hashed upload paths, so the server
 	 * resolves each referenced file once and hands the render module a map.
 	 * Missing files are reported as `exists => false` so the module can render
-	 * a visible placeholder instead of a broken image (D2).
+	 * a visible placeholder instead of a broken image (D2). Tokens in code
+	 * spans and fences are ignored (brewProseText).
 	 *
 	 * @param mixed $text Raw brew markdown.
 	 * @return array File name => array( 'url' => string, 'exists' => bool ).
@@ -468,6 +573,7 @@ class HomebreweryWiki {
 		if ( !is_string( $text ) ) {
 			return $map;
 		}
+		$text = self::brewProseText( $text );
 		if ( !preg_match_all( '/\[\[File:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
 			return $map;
 		}
@@ -752,11 +858,14 @@ class HomebreweryWiki {
         // E3.5S3T4: categories come from source tokens, not the wikitext
         // parser (brew views skip it). Register them for the skin footer.
         $categories = self::brewCategoryNames( $text );
-        if ( count( $categories ) ) {
-            $categoryLinks = array();
-            foreach ( $categories as $category ) {
-                $categoryLinks[self::categoryDbKey( $category )] = 'normal';
+        $categoryLinks = array();
+        foreach ( $categories as $category ) {
+            $key = self::categoryDbKey( $category );
+            if ( $key !== null && $key !== '' ) {
+                $categoryLinks[$key] = 'normal';
             }
+        }
+        if ( count( $categoryLinks ) ) {
             $wgOut->addCategoryLinks( $categoryLinks );
         }
         return true;

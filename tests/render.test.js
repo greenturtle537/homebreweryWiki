@@ -142,6 +142,15 @@ function makePage( source, options ) {
                 + '<h2>Preview</h2><div class="previewnote">preview note</div>'
                 + placeholder
                 + '</div></div></body></html>';
+        } else if ( options.chrome ) {
+            // Monobook-style chrome around the content column: the print
+            // route must take these siblings out of layout (E3.5S4T3).
+            html = '<!doctype html><html><body><div id="globalWrapper">'
+                + '<div id="column-content"><div id="content">'
+                + placeholder
+                + '</div></div>'
+                + '<div id="footer">footer</div>'
+                + '</div></body></html>';
         } else {
             html = '<!doctype html><html><body><div id="content">'
                 + placeholder
@@ -1402,6 +1411,7 @@ function offOriginFetches( win, root ) {
         + 'See [[Page]] and [[Page Two|Second Page]].\n\n'
         + '[[Category:E35 Test]]\n\n'
         + '[[File:Name.png|alt text|caption|200px]]\n\n'
+        + '[[File: Name.png |thumb|200px|The map]]\n\n'
         + '[[File:Absent.png|missing alt]]\n\n'
         + '```\n[[Code Page]]\n```\n';
     var page = makePage( source, {
@@ -1413,6 +1423,7 @@ function offOriginFetches( win, root ) {
     var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
     var label = rendered ? rendered.querySelector( 'a[href="' + base + 'Page_Two"]' ) : null;
     var img = rendered ? rendered.querySelector( 'img[alt="alt text"]' ) : null;
+    var trimmed = rendered ? rendered.querySelector( 'img[alt="The map"]' ) : null;
     var missing = rendered ? rendered.querySelector( '.hbw-missing-file' ) : null;
     var text = rendered ? rendered.textContent : '';
     var hrefs = [];
@@ -1438,6 +1449,10 @@ function offOriginFetches( win, root ) {
     ok( !!img && /^width:\s*200px;\s*height:\s*auto$/.test(
         img.getAttribute( 'style' )
     ), 'wiki tokens: numeric file argument sizes the image' );
+    ok( !!trimmed && trimmed.getAttribute( 'src' ) === files[ 'Name.png' ].url,
+        'wiki tokens: file name is trimmed before the map lookup' );
+    ok( !!trimmed && trimmed.getAttribute( 'alt' ) === 'The map',
+        'wiki tokens: thumb/size options are not used as alt text' );
     ok( !!missing && missing.getAttribute( 'title' ) === 'Missing file: Absent.png' &&
         missing.textContent === '[File: Absent.png]',
         'wiki tokens: missing file renders a visible placeholder' );
@@ -1447,9 +1462,7 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'wiki tokens: no console errors' );
 }() );
 
-// PRODUCT BUG (E3.5S3T1): the wiki pass walks fenced blocks but not inline
-// backtick spans, so `[[Page]]` inside inline code is rewritten before
-// markdown sees it. The assertion below is intentionally left in place.
+// --- E3.5S3 T1: wiki tokens inside inline code stay literal ---
 ( function () {
     var base = 'http://wiki.example.test/index.php?title=';
     var source = 'Inline `[[Page]]` stays literal.\n\n'
@@ -1486,23 +1499,33 @@ function offOriginFetches( win, root ) {
     var base = 'http://wiki.example.test/index.php?title=';
     var source = '# Links\n\n'
         + '[Example](http://wiki.example.test/wiki/Example)\n\n'
-        + '[[Other Page]]\n';
+        + '[[Other Page]]\n\n'
+        + '[Jump](#links)\n';
     var page = makePage( source, { withHomebrewery: true, wikiBase: base } );
     var rendered = renderRoot( page );
     var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
     var hardened = 0;
+    var inPage = 0;
     var i;
 
     for ( i = 0; i < links.length; i++ ) {
-        if ( links[ i ].getAttribute( 'target' ) === '_top' &&
-            links[ i ].getAttribute( 'rel' ) === 'noopener noreferrer' ) {
+        if ( links[ i ].getAttribute( 'rel' ) !== 'noopener noreferrer' ) {
+            continue;
+        }
+        if ( links[ i ].getAttribute( 'href' ).charAt( 0 ) === '#' ) {
+            if ( links[ i ].getAttribute( 'target' ) === '_self' ) {
+                inPage++;
+            }
+        } else if ( links[ i ].getAttribute( 'target' ) === '_top' ) {
             hardened++;
         }
     }
 
-    ok( links.length === 2, 'anchors: markdown and wiki links both render' );
-    ok( links.length === 2 && hardened === links.length,
-        'anchors: every link gets target=_top and rel=noopener noreferrer' );
+    ok( links.length === 3, 'anchors: markdown, wiki and in-page links render' );
+    ok( hardened === 2,
+        'anchors: document links get target=_top and rel=noopener noreferrer' );
+    ok( inPage === 1,
+        'anchors: in-page anchors stay in the frame (target=_self)' );
     ok( page.errors.length === 0, 'anchors: no console errors' );
 }() );
 
@@ -1560,7 +1583,8 @@ function offOriginFetches( win, root ) {
 ( function () {
     var page = makePage( '# Print\n\nbody text\n', {
         print: true,
-        immediateTimers: true
+        immediateTimers: true,
+        chrome: true
     } );
     var frame = frameOf( page );
     var doc = page.win.document;
@@ -1568,12 +1592,29 @@ function offOriginFetches( win, root ) {
     var style = frameDoc ? frameDoc.getElementById( 'hbw-fit' ) : null;
     var scale = frame ? frame.getAttribute( 'data-hbw-scale' ) : null;
     var width = frame ? parseFloat( frame.style.width ) : 0;
+    var footer = doc.getElementById( 'footer' );
+    var column = doc.getElementById( 'column-content' );
+    var wrapper = doc.getElementById( 'globalWrapper' );
+    var host = doc.getElementById( 'hbw-brew' );
+    var themeCss = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    ).replace( /\/\*[\s\S]*?\*\//g, '' );
 
     ok( scale === '1', 'print: print route keeps scale 1' );
     ok( !!style && style.textContent.indexOf( '.page{margin:0;}' ) !== -1,
         'print: pages lose their screen margins' );
     ok( /\bhbw-print-mode\b/.test( doc.body.className ),
         'print: body carries hbw-print-mode' );
+    ok( !!footer && /\bhbw-print-hide\b/.test( footer.className ),
+        'print: chrome siblings are marked to leave the layout' );
+    ok( !!column && column.className.indexOf( 'hbw-print-hide' ) === -1 &&
+        !!wrapper && wrapper.className.indexOf( 'hbw-print-hide' ) === -1,
+        'print: host ancestors are never marked' );
+    ok( !!host && host.className.indexOf( 'hbw-print-hide' ) === -1,
+        'print: the brew host is never marked' );
+    ok( themeCss.indexOf( 'body.hbw-print-mode .hbw-print-hide' ) !== -1 &&
+        themeCss.indexOf( 'visibility' ) === -1,
+        'print: chrome is removed from layout, not merely hidden' );
     ok( Math.round( width ) === 816,
         'print: iframe is pinned to the letter width (got ' + width + ')' );
     ok( page.win.__printCount === 1,

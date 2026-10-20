@@ -720,6 +720,62 @@ t_assert( array_key_exists( 'url', $fileMap['HbwTestMissing.png'] ) &&
     is_string( $fileMap['HbwTestMissing.png']['url'] ),
     'E3.5 file map: each entry carries a url string' );
 
+// --- E3.5S3: code spans and fences never donate source tokens ---
+$codeText = "`[[Category:Hidden]]` stays literal\n"
+    . "\n"
+    . "```\n"
+    . "[[Category:Fenced]]\n"
+    . "[[Fenced Page]]\n"
+    . "[[File:Fenced.png]]\n"
+    . "```not-a-close\n"
+    . "[[Category:Still Fenced]]\n"
+    . "```\n"
+    . "\n"
+    . "[[Category:Visible]]\n"
+    . "[[Real Page]]\n"
+    . "[[File:Real.png]]\n";
+$codeCats = HomebreweryWiki::brewCategoryNames( $codeText );
+t_assert( $codeCats === array( 'Visible' ),
+    'E3.5 code filter: categories come from prose only (' . implode( ', ', $codeCats ) . ')' );
+$codeLinks = HomebreweryWiki::brewLinkTargets( $codeText );
+t_assert( $codeLinks === array( 'Real Page' ),
+    'E3.5 code filter: links come from prose only (' . implode( ', ', $codeLinks ) . ')' );
+$codeFiles = HomebreweryWiki::brewFileMap( $codeText );
+t_assert( count( $codeFiles ) === 1 && isset( $codeFiles['Real.png'] ),
+    'E3.5 code filter: files come from prose only' );
+
+$inlineProse = HomebreweryWiki::brewProseText( "keep `[[Page]]` tail\n" );
+t_assert( strpos( $inlineProse, '[[Page]]' ) === false &&
+    strpos( $inlineProse, 'keep' ) !== false,
+    'E3.5 code filter: inline code spans are removed' );
+
+$tildeProse = HomebreweryWiki::brewProseText(
+    "~~~\n[[Category:Tilde]]\n~~~\n[[Category:After]]\n"
+);
+t_assert( strpos( $tildeProse, 'Tilde' ) === false &&
+    strpos( $tildeProse, 'After' ) !== false,
+    'E3.5 code filter: tilde fences are removed' );
+
+$longFence = HomebreweryWiki::brewProseText(
+    "````\n[[Category:Four]]\n```\n[[Category:Three]]\n````\n[[Category:After]]\n"
+);
+t_assert( strpos( $longFence, 'Three' ) === false &&
+    strpos( $longFence, 'Four' ) === false &&
+    strpos( $longFence, 'After' ) !== false,
+    'E3.5 code filter: a shorter run does not close a longer fence' );
+
+// MediaWiki rejects some category names outright; the extractor must then
+// yield no key rather than invent one the parser would refuse.
+$badName = 'Bad[Name';
+$badTitle = Title::makeTitleSafe( NS_CATEGORY, $badName );
+if ( $badTitle === null ) {
+    t_assert( HomebreweryWiki::categoryDbKey( $badName ) === null,
+        'E3.5 categories: an invalid title yields no DB key' );
+} else {
+    t_assert( HomebreweryWiki::categoryDbKey( $badName ) === $badTitle->getDBkey(),
+        'E3.5 categories: valid titles keep their DB key' );
+}
+
 $phWiki = HomebreweryWiki::brewPlaceholder( "[[Main Page]]\n[[File:HbwTestMissing.png]]" );
 t_assert( strpos( $phWiki, 'data-hbw-wiki-base="' ) !== false,
     'E3.5 placeholder: wiki base attribute emitted' );

@@ -323,9 +323,12 @@
             }
 
             if ( node.nodeName && node.nodeName.toLowerCase() === 'a' ) {
-                // Wiki links must navigate the parent, never the frame
-                // (E3.5S3T2); rel keeps the opener isolated.
-                node.setAttribute( 'target', '_top' );
+                // Wiki links navigate the parent (E3.5S3T2); in-page anchors
+                // scroll the brew itself, so they stay inside the frame.
+                var href = node.getAttribute( 'href' ) || '';
+                node.setAttribute(
+                    'target', href.charAt( 0 ) === '#' ? '_self' : '_top'
+                );
                 node.setAttribute( 'rel', 'noopener noreferrer' );
             }
 
@@ -529,6 +532,13 @@
     var WIKI_TOKEN = /\[\[([^\[\]|]+)((?:\|[^\[\]]*)*)\]\]/g;
 
     /**
+     * MediaWiki file options that are never alt text (E3.5S3T3).
+     *
+     * @type {RegExp}
+     */
+    var MEDIA_OPTION = /^(?:thumb|thumbnail|frame|frameless|border|left|right|center|centre|upright|baseline|sub|super|top|text-top|middle|bottom|text-bottom)$/i;
+
+    /**
      * Escape text for insertion into generated HTML.
      *
      * @param {string} value
@@ -581,9 +591,24 @@
         }
 
         if ( lower.indexOf( 'file:' ) === 0 ) {
-            name = target.substring( 5 );
-            info = config.files[ name ];
-            alt = args.length && args[ 0 ] ? args[ 0 ] : name;
+            // The server trims the name before building its map; do the same
+            // so `[[File: Name.png ]]` still resolves. Own-property lookup
+            // keeps prototype members from being treated as uploads.
+            name = target.substring( 5 ).replace( /^\s+|\s+$/g, '' );
+            info = Object.prototype.hasOwnProperty.call( config.files || {}, name )
+                ? config.files[ name ]
+                : null;
+            // `alt` is the first argument that is neither a size nor a
+            // MediaWiki option; `thumb`/`200px` must never be read aloud.
+            alt = name;
+            for ( i = 0; i < args.length; i++ ) {
+                if ( !args[ i ] || /^\d+(px)?$/.test( args[ i ] ) ||
+                    MEDIA_OPTION.test( args[ i ] ) ) {
+                    continue;
+                }
+                alt = args[ i ];
+                break;
+            }
             size = '';
             for ( i = 0; i < args.length; i++ ) {
                 if ( /^\d+(px)?$/.test( args[ i ] ) ) {
@@ -1366,6 +1391,39 @@
     }
 
     /**
+     * Mark the wiki chrome around the brew host for print (E3.5S4T3/T4).
+     *
+     * The print route reuses the wiki document, so the skin chrome would keep
+     * its layout space and add blank sheets. Every element that is not on the
+     * host's ancestor path is tagged `.hbw-print-hide`, which the theme
+     * removes from layout (`display: none`) under `@media print`.
+     *
+     * @param {HTMLElement} host brew host element.
+     * @return {void}
+     */
+    function isolatePrintHost( host ) {
+        var node = host;
+        var parent;
+        var kids;
+        var i;
+        var cls;
+        while ( node && node.parentNode && node.parentNode.nodeType === 1 ) {
+            parent = node.parentNode;
+            kids = parent.childNodes;
+            for ( i = 0; i < kids.length; i++ ) {
+                if ( kids[ i ].nodeType !== 1 || kids[ i ] === node ) {
+                    continue;
+                }
+                cls = kids[ i ].getAttribute( 'class' ) || '';
+                kids[ i ].setAttribute(
+                    'class', ( cls + ' hbw-print-hide' ).replace( /^\s+/, '' )
+                );
+            }
+            node = parent;
+        }
+    }
+
+    /**
      * Create the sandboxed same-origin render host (E3.5S1 / E3.5S6).
      *
      * @return {HTMLIFrameElement}
@@ -1522,6 +1580,7 @@
                     document.body.className = ( document.body.className + ' hbw-print-mode' )
                         .replace( /^\s+/, '' );
                 }
+                isolatePrintHost( host );
                 // Give the theme fonts a moment, then print the sheet stack.
                 setTimeout( function () {
                     if ( window.print ) {
