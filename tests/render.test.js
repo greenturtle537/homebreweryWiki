@@ -1232,6 +1232,35 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'unclosed fence: no console errors' );
 }() );
 
+// --- E3B1 follow-up: a fence inside a note stays in the note ---
+( function () {
+    var source = 'Prose cites alpha.[^a]\n\n'
+        + '[^a]: see this\n'
+        + '  ```\n'
+        + '  code sample\n'
+        + '  ```\n'
+        + '  more text\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = page.win.document.getElementById( 'hbw-brew-rendered' );
+    var refs = rendered ? rendered.querySelectorAll( 'a.hbw-footnote-ref' ) : [];
+    var notes = rendered ? rendered.querySelectorAll( '.hbw-footnotes-list li.hbw-footnote' ) : [];
+    var columns = rendered ? rendered.querySelectorAll( '.hbw-column pre' ) : [];
+    var noteHtml = notes.length ? notes[ 0 ].innerHTML : '';
+
+    ok( refs.length === 1 && refs[ 0 ].getAttribute( 'href' ) === '#hbw-fn-1-a',
+        'note fence: prose reference links its note' );
+    ok( notes.length === 1, 'note fence: one note emitted' );
+    ok( notes.length === 1 &&
+        notes[ 0 ].textContent.indexOf( 'see this' ) !== -1 &&
+        notes[ 0 ].textContent.indexOf( 'code sample' ) !== -1 &&
+        notes[ 0 ].textContent.indexOf( 'more text' ) !== -1,
+        'note fence: the whole block and its text live in the note' );
+    ok( columns.length === 0, 'note fence: no stray code block in the page body' );
+    ok( noteHtml.indexOf( 'pre' ) !== -1,
+        'note fence: the code sample renders as code inside the note' );
+    ok( page.errors.length === 0, 'note fence: no console errors' );
+}() );
+
 // --- E3S3 T2: data-* hygiene on the hardened tree ---
 ( function () {
     var source = '<div data-evil="1" data-hbw-footnote="kept">content</div>\n';

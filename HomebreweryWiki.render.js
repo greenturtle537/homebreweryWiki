@@ -622,18 +622,72 @@
         var masked;
         var match;
         var offset;
+        var openMatch;
         var current;
+        var noteFence;
+        var fenceChar;
+        var fenceLength;
         var p;
 
         for ( p = 0; p < pages.length; p++ ) {
             kept = [];
             current = null;
+            noteFence = false;
+            fenceChar = null;
+            fenceLength = 0;
             walker = createProseWalker( pages[ p ] );
+
             while ( ( step = walker.next() ) !== null ) {
                 if ( !step.prose ) {
+                    line = step.text.replace( /\n$/, '' );
+
+                    if ( fenceChar === null ) {
+                        // The walker only marks a line as code when it opens
+                        // a fence, so this is an opening fence line.
+                        openMatch = /^ {0,3}(`{3,}|~{3,})/.exec( line );
+                        if ( openMatch ) {
+                            fenceChar = openMatch[ 1 ].charAt( 0 );
+                            fenceLength = openMatch[ 1 ].length;
+                            if ( current !== null ) {
+                                // A fence opened while a note is active
+                                // belongs to that note (E3B1 follow-up).
+                                noteFence = true;
+                                notes[ current ] += '\n' + line;
+                                continue;
+                            }
+                        }
+                        kept.push( step.text );
+                        continue;
+                    }
+
+                    if ( new RegExp( '^ {0,3}' + fenceChar +
+                            '{' + fenceLength + ',}[ \\t]*$' ).test( line ) ) {
+                        // Closing fence: hand it to the note when the fence
+                        // opened inside it, otherwise it is page content.
+                        fenceChar = null;
+                        fenceLength = 0;
+                        if ( current !== null && noteFence ) {
+                            notes[ current ] += '\n' + line;
+                            noteFence = false;
+                            continue;
+                        }
+                        current = null;
+                        noteFence = false;
+                        kept.push( step.text );
+                        continue;
+                    }
+
+                    // Interior fence line.
+                    if ( current !== null && noteFence ) {
+                        notes[ current ] += '\n' + line;
+                        continue;
+                    }
+                    current = null;
+                    noteFence = false;
                     kept.push( step.text );
                     continue;
                 }
+
                 line = step.text.replace( /\n$/, '' );
                 masked = maskInlineCode( line );
 
@@ -648,6 +702,7 @@
                     continue;
                 }
                 current = null;
+                noteFence = false;
 
                 match = FOOTNOTE_DEF_LINE.exec( masked );
                 if ( match ) {
