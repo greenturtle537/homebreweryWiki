@@ -548,6 +548,12 @@ class HomebreweryWiki {
 				if ( $target === '' ) {
 					continue;
 				}
+				// E4B5: a bare `[[#Section]]` is a same-page anchor, not a
+				// page link.  `[[Page#Section]]` still registers as `Page`
+				// because Title::newFromText() drops the fragment.
+				if ( $target[0] === '#' ) {
+					continue;
+				}
 				if ( preg_match( '/^(Category|File):/i', $target ) ) {
 					continue;
 				}
@@ -575,6 +581,17 @@ class HomebreweryWiki {
 	public static function brewLinkMap( $text ) {
 		$map = array();
 		foreach ( self::brewLinkTargets( $text ) as $target ) {
+			// E4B5: the renderer keys the map on the page title and appends
+			// the `#fragment` to the href, so the map must drop it too; a
+			// bare `[[#Section]]` has no page to look up.
+			$hash = strpos( $target, '#' );
+			if ( $hash !== false ) {
+				$target = substr( $target, 0, $hash );
+			}
+			$target = trim( $target );
+			if ( $target === '' ) {
+				continue;
+			}
 			// Match the renderer's `\s+ -> _` key exactly.  JavaScript's
 			// `\s` includes Unicode spaces (NBSP, thin space, ...); PHP's
 			// ASCII `\s` does not, so add the Unicode separator class.  A

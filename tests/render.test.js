@@ -1523,6 +1523,35 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'red links: no console errors' );
 }() );
 
+// --- E4B5: a wiki-link fragment stays an anchor, not part of the title ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Links\n\n'
+        + 'See [[Page#Section|label]], [[Page#Section]], [[#Local]] and '
+        + '[[Missing#Part|gone]].\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base,
+        links: { 'Page': true, 'Missing': false }
+    } );
+    var rendered = renderRoot( page );
+    var local = rendered ? rendered.querySelector( 'a[href="#Local"]' ) : null;
+    var missing = rendered ? rendered.querySelector(
+        'a[href="' + base + 'Missing#Part"]'
+    ) : null;
+
+    ok( !!rendered && !!rendered.querySelector( 'a[href="' + base + 'Page#Section"]' ),
+        'wiki fragment: the page anchor stays outside the title parameter' );
+    ok( !!rendered && !rendered.querySelector( 'a[href*="%23"]' ),
+        'wiki fragment: the # is never percent-encoded into the title' );
+    ok( !!local, 'wiki fragment: a bare #anchor is a same-page link' );
+    ok( !!local && local.getAttribute( 'target' ) === '_self',
+        'wiki fragment: a bare #anchor stays inside the iframe' );
+    ok( !!missing && ( ' ' + missing.className + ' ' ).indexOf( ' new ' ) !== -1,
+        'wiki fragment: a missing page is still a red link' );
+    ok( page.errors.length === 0, 'wiki fragment: no console errors' );
+}() );
+
 // --- E3.5S3 T1: wiki tokens inside inline code stay literal ---
 ( function () {
     var base = 'http://wiki.example.test/index.php?title=';

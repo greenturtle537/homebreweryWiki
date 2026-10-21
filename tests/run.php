@@ -745,6 +745,15 @@ $linkMapCode = HomebreweryWiki::brewLinkMap( "`[[Hidden Page]]`\n\n[[Shown Page]
 t_assert( !isset( $linkMapCode['Hidden_Page'] ) && isset( $linkMapCode['Shown_Page'] ),
     'E4S1T3 link map: code spans never donate a target' );
 
+// --- E4B5: fragments are anchors, not part of the page title ---
+$fragMap = HomebreweryWiki::brewLinkMap( "[[Page#Section]]\n[[#Local]]\n" );
+t_assert( array_key_exists( 'Page', $fragMap ) &&
+    !array_key_exists( 'Page#Section', $fragMap ),
+    'E4B5 link map: the fragment does not become part of the key' );
+t_assert( !array_key_exists( '#Local', $fragMap ) &&
+    !array_key_exists( '', $fragMap ),
+    'E4B5 link map: a bare fragment is not a page target' );
+
 // --- E4S4T1: readable search snippets from brew markdown ---
 $snippetSource = "# Brew Heading\n\n"
     . "See [[Page|the label]] and [[Page Two]].\n\n"

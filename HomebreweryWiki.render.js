@@ -609,6 +609,9 @@
         var src;
         var key;
         var exists;
+        var page;
+        var anchor;
+        var hash;
         var i;
 
         if ( lower.indexOf( 'category:' ) === 0 ) {
@@ -653,15 +656,36 @@
         if ( !config.base ) {
             return '[[' + target + ( args.length ? '|' + args.join( '|' ) : '' ) + ']]';
         }
+        // E4B5: the first `#` separates the page title from the anchor.
+        // Percent-encoding it into the title parameter produces a link to a
+        // page literally named "Page#Section", and the browser never scrolls
+        // to the section, so the two parts are encoded separately.
+        anchor = '';
+        hash = target.indexOf( '#' );
+        page = ( hash === -1 ) ? target : target.substring( 0, hash );
+        if ( hash !== -1 ) {
+            anchor = target.substring( hash + 1 ).replace( /^\s+|\s+$/g, '' );
+        }
         // E4S1T3: the parent resolves each target's existence (the iframe
         // runs no scripts and cannot query the wiki).  Only a target the
         // parent positively reports as absent becomes a red link; an unknown
         // target keeps the plain link rather than inventing a red one.
-        key = target.replace( /\s+/g, '_' );
+        key = page.replace( /\s+/g, '_' );
+        // A bare `#Section` is a same-page link: it stays inside the iframe,
+        // where `hardenTree` forces `target="_self"`.
+        if ( !key ) {
+            return '<a href="#' + escapeHtml( encodeURIComponent(
+                anchor.replace( /\s+/g, '_' )
+            ) ) + '">' +
+                escapeHtml( args.length && args[ 0 ] ? args[ 0 ] : target ) + '</a>';
+        }
         exists = config.links && Object.prototype.hasOwnProperty.call(
             config.links, key
         ) ? config.links[ key ] : null;
-        return '<a href="' + escapeHtml( config.base + encodeURIComponent( key ) ) +
+        return '<a href="' + escapeHtml(
+            config.base + encodeURIComponent( key ) +
+            ( anchor ? '#' + encodeURIComponent( anchor.replace( /\s+/g, '_' ) ) : '' )
+        ) +
             '" target="_top" rel="noopener noreferrer"' +
             ( exists === false ? ' class="new"' : '' ) + '>' +
             escapeHtml( args.length && args[ 0 ] ? args[ 0 ] : target ) + '</a>';
