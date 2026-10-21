@@ -580,11 +580,16 @@ class HomebreweryWiki {
 			// ASCII `\s` does not, so add the Unicode separator class.  A
 			// malformed target falls back to the ASCII rule rather than
 			// producing a null key.
-			// Special pages have no on-disk title to test; leave them out of
-			// the existence map so a valid [[Special:...]] never gets the
-			// red-link class.  They still flow through the normal link
-			// registration path.
-			if ( preg_match( '/^Special:/i', $target ) ) {
+			// Resolve the title once and use it for both tests below.  A
+			// literal `Special:` prefix is not enough on 1.14: the namespace
+			// is localised (e.g. `Spezial:`), so ask Title for the namespace.
+			// Special pages have no stored row, so Title::exists() reports
+			// them missing and the renderer would draw a valid link red.
+			$title = null;
+			if ( class_exists( 'Title' ) ) {
+				$title = Title::newFromText( $target );
+			}
+			if ( $title instanceof Title && $title->getNamespace() === NS_SPECIAL ) {
 				continue;
 			}
 			$normalized = preg_replace( '/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $target );
@@ -595,11 +600,7 @@ class HomebreweryWiki {
 			if ( $key === null ) {
 				$key = preg_replace( '/\s+/', '_', $normalized );
 			}
-			$exists = false;
-			if ( class_exists( 'Title' ) ) {
-				$title = Title::newFromText( $target );
-				$exists = ( $title instanceof Title && $title->exists() );
-			}
+			$exists = ( $title instanceof Title && $title->exists() );
 			$map[$key] = $exists;
 		}
 		return $map;
@@ -618,6 +619,29 @@ class HomebreweryWiki {
 		}
 		$json = json_encode( $map );
 		return ( $json === false ) ? '{}' : $json;
+	}
+
+	/**
+	 * Pick the search engine for this site (E4S4T1).
+	 *
+	 * Clean snippets need the MySQL result subclass.  MediaWiki 1.14.1
+	 * chooses its engine from the database when $wgSearchType is empty,
+	 * so only override when that choice is MySQL, or when the site already
+	 * names the core MySQL engine.  PostgreSQL and SQLite sites keep their
+	 * own engine and its database-specific queries.
+	 *
+	 * @param mixed $engine Current $wgSearchType.
+	 * @param mixed $dbType Current $wgDBtype.
+	 * @return mixed Engine name to use.
+	 */
+	public static function brewSearchEngine( $engine, $dbType ) {
+		if ( $engine === 'SearchMySQL' || $engine === 'MySQLSearch' ) {
+			return 'HomebreweryWiki_SearchMySQL';
+		}
+		if ( ( $engine === null || $engine === '' ) && $dbType === 'mysql' ) {
+			return 'HomebreweryWiki_SearchMySQL';
+		}
+		return $engine;
 	}
 
 	/**

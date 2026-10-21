@@ -738,6 +738,9 @@ t_assert( isset( $nbspMap['Caf_Page'] ),
     'E4S1T3 link map: a non-breaking space normalizes like the renderer' );
 t_assert( isset( $nbspMap['_Private_Page'] ),
     'E4S1T3 link map: a literal leading underscore is preserved' );
+$specialMap = HomebreweryWiki::brewLinkMap( "[[Special:RecentChanges]]\n" );
+t_assert( !isset( $specialMap['Special:RecentChanges'] ),
+    'E4S1T3 link map: Special pages stay out of the existence map' );
 $linkMapCode = HomebreweryWiki::brewLinkMap( "`[[Hidden Page]]`\n\n[[Shown Page]]\n" );
 t_assert( !isset( $linkMapCode['Hidden_Page'] ) && isset( $linkMapCode['Shown_Page'] ),
     'E4S1T3 link map: code spans never donate a target' );
@@ -786,8 +789,22 @@ t_assert( strpos( $renderedSnippet, 'Brew' ) !== false &&
     strpos( $renderedSnippet, 'Heading' ) !== false &&
     strpos( $renderedSnippet, '[[' ) === false,
     'E4S4 search: a brew result highlights readable text' );
-t_assert( $wgSearchType === 'HomebreweryWiki_SearchMySQL',
-    'E4S4 search: snippet-aware engine installed' );
+t_assert( $wgSearchType !== 'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: non-MySQL harness keeps its own engine' );
+t_assert( HomebreweryWiki::brewSearchEngine( 'SearchMySQL', 'mysql' ) ===
+    'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: an explicit MySQL engine is subclassed' );
+t_assert( HomebreweryWiki::brewSearchEngine( 'MySQLSearch', 'sqlite' ) ===
+    'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: the MySQLSearch alias is subclassed' );
+t_assert( HomebreweryWiki::brewSearchEngine( '', 'mysql' ) ===
+    'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: the MySQL database default is subclassed' );
+t_assert( HomebreweryWiki::brewSearchEngine( '', 'postgres' ) === '',
+    'E4S4 search: the PostgreSQL database default is preserved' );
+t_assert( HomebreweryWiki::brewSearchEngine( 'LuceneSearch', 'mysql' ) ===
+    'LuceneSearch',
+    'E4S4 search: a third-party engine is preserved' );
 
 // --- E3.5S3: code spans and fences never donate source tokens ---
 $codeText = "`[[Category:Hidden]]` stays literal\n"

@@ -169,13 +169,14 @@ $wgAutoloadClasses['HomebreweryWiki_SearchMySQL']         = dirname( __FILE__ ) 
  * `SearchResult::getTextSnippet()` is a method, not a hook, so the only
  * extension point in 1.14 is the engine.  The subclass keeps the core MySQL
  * behaviour and only changes the snippet text of brew-namespace results.
- * It is installed only when the site is on the built-in MySQL engine: a site
- * that configured another engine (Lucene, etc.) keeps it untouched.
+ * It is installed only when the engine in play is MySQL - explicitly, or by
+ * database default.  PostgreSQL, SQLite and third-party engines keep the
+ * engine MediaWiki selected, because the subclass issues MySQL queries.
  */
-if ( empty( $wgSearchType ) || $wgSearchType === 'SearchMySQL' ||
-     $wgSearchType === 'MySQLSearch' ) {
-    $wgSearchType = 'HomebreweryWiki_SearchMySQL';
-}
+$wgSearchType = HomebreweryWiki::brewSearchEngine(
+    $wgSearchType,
+    isset( $wgDBtype ) ? $wgDBtype : 'mysql'
+);
 
 /**
  * Brew content type.  MediaWiki 1.14 has no ContentHandler, so a brew page is
