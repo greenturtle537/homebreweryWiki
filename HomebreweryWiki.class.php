@@ -575,6 +575,13 @@ class HomebreweryWiki {
 	public static function brewLinkMap( $text ) {
 		$map = array();
 		foreach ( self::brewLinkTargets( $text ) as $target ) {
+			// Special pages have no on-disk title to test; leave them out of
+			// the existence map so a valid [[Special:...]] never gets the
+			// red-link class.  They still flow through the normal link
+			// registration path.
+			if ( preg_match( '/^Special:/i', $target ) ) {
+				continue;
+			}
 			// Match the renderer's `\s+ -> _` key exactly.  JavaScript's
 			// `\s` includes Unicode spaces (NBSP, thin space, ...); PHP's
 			// ASCII `\s` does not, so add the Unicode separator class.  A
