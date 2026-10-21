@@ -159,6 +159,23 @@ $wgExtensionMessagesFiles['HomebreweryWiki'] = dirname( __FILE__ ) . '/Homebrewe
  */
 $wgAutoloadClasses['HomebreweryWiki']         = dirname( __FILE__ ) . '/HomebreweryWiki.class.php';
 $wgAutoloadClasses['HomebreweryWiki_Article'] = dirname( __FILE__ ) . '/HomebreweryWiki_Article.php';
+$wgAutoloadClasses['HomebreweryWiki_SearchResult']         = dirname( __FILE__ ) . '/HomebreweryWiki_Search.php';
+$wgAutoloadClasses['HomebreweryWiki_MySQLSearchResultSet'] = dirname( __FILE__ ) . '/HomebreweryWiki_Search.php';
+$wgAutoloadClasses['HomebreweryWiki_SearchMySQL']         = dirname( __FILE__ ) . '/HomebreweryWiki_Search.php';
+
+/**
+ * Clean search snippets for brew pages (E4S4T1).
+ *
+ * `SearchResult::getTextSnippet()` is a method, not a hook, so the only
+ * extension point in 1.14 is the engine.  The subclass keeps the core MySQL
+ * behaviour and only changes the snippet text of brew-namespace results.
+ * It is installed only when the site is on the built-in MySQL engine: a site
+ * that configured another engine (Lucene, etc.) keeps it untouched.
+ */
+if ( empty( $wgSearchType ) || $wgSearchType === 'SearchMySQL' ||
+     $wgSearchType === 'MySQLSearch' ) {
+    $wgSearchType = 'HomebreweryWiki_SearchMySQL';
+}
 
 /**
  * Brew content type.  MediaWiki 1.14 has no ContentHandler, so a brew page is

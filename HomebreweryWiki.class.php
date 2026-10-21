@@ -614,6 +614,64 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Readable text for a brew revision, used for search snippets (E4S4T1).
+	 *
+	 * MediaWiki builds a snippet from the stored revision text, which for a
+	 * brew is markdown.  This strips the syntax that carries no meaning in a
+	 * result list - heading hashes, fences, split markers, table pipes,
+	 * emphasis - and keeps what a reader would see: link labels, image alt
+	 * text, inline-code content and prose.  Categories and embedded files
+	 * contribute nothing; a footnote definition keeps its body.
+	 *
+	 * Best-effort by design (Q5: no server-side rendering for MVP); it must
+	 * never throw or return markup, so every step is a plain substitution.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return string Plain text, single-spaced.
+	 */
+	public static function brewSnippetText( $text ) {
+		if ( !is_string( $text ) ) {
+			return '';
+		}
+		$text = str_replace( array( "\r\n", "\r" ), "\n", $text );
+		// Footnote definitions first (their marker is syntax), then references.
+		$text = preg_replace( '/^[ \t]*\[\^[^\]\s]+\][ \t]*:[ \t]*/m', '', $text );
+		$text = preg_replace( '/\[\^[^\]\s]+\]/', '', $text );
+		// Fence lines and Homebrewery split markers are layout, not prose.
+		$text = preg_replace( '/^[ \t]*(?:`{3,}|~{3,})[^\n]*$/m', '', $text );
+		$text = preg_replace( '/^[ \t]*\\\\(?:page|pagebreak|column|columnbreak)\b[^\n]*$/mi', '', $text );
+		// Wiki tokens: categories and files carry no readable text; a piped
+		// link contributes its label, a bare one its target.
+		$text = preg_replace( '/\[\[Category:[^\]|]*(?:\|[^\]]*)?\]\]/i', '', $text );
+		$text = preg_replace( '/\[\[File:[^\]|]*(?:\|[^\]]*)?\]\]/i', '', $text );
+		$text = preg_replace( '/\[\[([^\]|]+)\|([^\]]*)\]\]/', '$2', $text );
+		$text = preg_replace( '/\[\[([^\]|]+)\]\]/', '$1', $text );
+		// Markdown images keep their alt text; links keep their label.
+		$text = preg_replace( '/!\[([^\]]*)\]\([^)]*\)/', '$1', $text );
+		$text = preg_replace( '/\[([^\]]+)\]\([^)]*\)/', '$1', $text );
+		// Inline code keeps its content; Homebrewery spans keep their text.
+		$text = preg_replace( '/`+([^`]*)`+/', '$1', $text );
+		$text = preg_replace( '/\{\{([^{}]*)\}\}/', '$1', $text );
+		// Block syntax: heading hashes, quotes, list bullets.
+		$text = preg_replace( '/^[ \t]*#{1,6}[ \t]*/m', '', $text );
+		$text = preg_replace( '/^[ \t]*>[ \t]?/m', '', $text );
+		$text = preg_replace( '/^[ \t]*(?:[-*+]|\d+\.)[ \t]+/m', '', $text );
+		// Emphasis markers.
+		$text = preg_replace( '/(\*\*|__)([^\n]*?)\1/', '$2', $text );
+		$text = preg_replace( '/(?<![\w*])\*([^*\n]+)\*(?!\w)/', '$1', $text );
+		// Table separator rows and cell pipes.
+		$text = preg_replace( '/^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$/m', '', $text );
+		$text = str_replace( '|', ' ', $text );
+		// Anything left that looks like a tag is not readable text.
+		$text = strip_tags( $text );
+		$text = html_entity_decode( $text, ENT_QUOTES, 'UTF-8' );
+		// Collapse layout whitespace into one readable paragraph.
+		$text = preg_replace( '/[ \t]+/', ' ', $text );
+		$text = preg_replace( '/\s*\n\s*/', ' ', $text );
+		return trim( $text );
+	}
+
+	/**
 	 * Resolve `[[File:...]]` tokens to same-origin upload URLs (E3.5S3T3).
 	 *
 	 * The client cannot derive MediaWiki's hashed upload paths, so the server

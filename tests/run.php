@@ -742,6 +742,53 @@ $linkMapCode = HomebreweryWiki::brewLinkMap( "`[[Hidden Page]]`\n\n[[Shown Page]
 t_assert( !isset( $linkMapCode['Hidden_Page'] ) && isset( $linkMapCode['Shown_Page'] ),
     'E4S1T3 link map: code spans never donate a target' );
 
+// --- E4S4T1: readable search snippets from brew markdown ---
+$snippetSource = "# Brew Heading\n\n"
+    . "See [[Page|the label]] and [[Page Two]].\n\n"
+    . "[[Category:E4S4 Test]]\n\n"
+    . "[[File:Map.png|alt text|caption|200px]]\n\n"
+    . "**bold** and *italic* and `inline code`.\n\n"
+    . "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+    . "\\page\n\n"
+    . "[^n]: note body\n\n"
+    . "Ref[^n]\n";
+$snippet = HomebreweryWiki::brewSnippetText( $snippetSource );
+t_assert( strpos( $snippet, 'Brew Heading' ) !== false &&
+    strpos( $snippet, '#' ) === false,
+    'E4S4 snippet: heading hash is stripped' );
+t_assert( strpos( $snippet, 'the label' ) !== false &&
+    strpos( $snippet, '[[' ) === false,
+    'E4S4 snippet: wiki link keeps its label, drops the syntax' );
+t_assert( strpos( $snippet, 'Category:' ) === false &&
+    strpos( $snippet, 'Map.png' ) === false,
+    'E4S4 snippet: categories and files contribute nothing' );
+t_assert( strpos( $snippet, 'bold' ) !== false &&
+    strpos( $snippet, '**' ) === false &&
+    strpos( $snippet, 'inline code' ) !== false,
+    'E4S4 snippet: emphasis and code keep their text' );
+t_assert( strpos( $snippet, '\\page' ) === false,
+    'E4S4 snippet: split markers are removed' );
+t_assert( strpos( $snippet, 'note body' ) !== false &&
+    strpos( $snippet, '[^n]' ) === false,
+    'E4S4 snippet: footnote body survives, marker does not' );
+t_assert( strpos( $snippet, '|---|---|' ) === false &&
+    strpos( $snippet, '|' ) === false,
+    'E4S4 snippet: table syntax is flattened' );
+
+$snippetRow = (object) array(
+    'page_namespace' => NS_MANUAL,
+    'page_title' => 'E4S4 Snippet ' . uniqid()
+);
+$snippetResult = new HomebreweryWiki_SearchResult( $snippetRow );
+$snippetResult->mText = "# Brew Heading\n\nSee [[Page|the label]].\n";
+$renderedSnippet = $snippetResult->getTextSnippet( array( 'Brew' ) );
+t_assert( strpos( $renderedSnippet, 'Brew' ) !== false &&
+    strpos( $renderedSnippet, 'Heading' ) !== false &&
+    strpos( $renderedSnippet, '[[' ) === false,
+    'E4S4 search: a brew result highlights readable text' );
+t_assert( $wgSearchType === 'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: snippet-aware engine installed' );
+
 // --- E3.5S3: code spans and fences never donate source tokens ---
 $codeText = "`[[Category:Hidden]]` stays literal\n"
     . "\n"
