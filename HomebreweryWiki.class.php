@@ -580,6 +580,13 @@ class HomebreweryWiki {
 			// ASCII `\s` does not, so add the Unicode separator class.  A
 			// malformed target falls back to the ASCII rule rather than
 			// producing a null key.
+			// Special pages have no on-disk title to test; leave them out of
+			// the existence map so a valid [[Special:...]] never gets the
+			// red-link class.  They still flow through the normal link
+			// registration path.
+			if ( preg_match( '/^Special:/i', $target ) ) {
+				continue;
+			}
 			$normalized = preg_replace( '/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $target );
 			if ( $normalized === null ) {
 				$normalized = trim( $target );
