@@ -575,7 +575,19 @@ class HomebreweryWiki {
 	public static function brewLinkMap( $text ) {
 		$map = array();
 		foreach ( self::brewLinkTargets( $text ) as $target ) {
-			$key = preg_replace( '/\s+/', '_', $target );
+			// Match the renderer's `\s+ -> _` key exactly.  JavaScript's
+			// `\s` includes Unicode spaces (NBSP, thin space, ...); PHP's
+			// ASCII `\s` does not, so add the Unicode separator class.  A
+			// malformed target falls back to the ASCII rule rather than
+			// producing a null key.
+			$normalized = preg_replace( '/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $target );
+			if ( $normalized === null ) {
+				$normalized = trim( $target );
+			}
+			$key = preg_replace( '/[\s\p{Z}]+/u', '_', $normalized );
+			if ( $key === null ) {
+				$key = preg_replace( '/\s+/', '_', $normalized );
+			}
 			$exists = false;
 			if ( class_exists( 'Title' ) ) {
 				$title = Title::newFromText( $target );

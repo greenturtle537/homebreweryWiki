@@ -732,6 +732,12 @@ t_assert( !isset( $linkMap['E35_Test'] ) && !isset( $linkMap['Name.png'] ),
 $linkMapJson = HomebreweryWiki::brewLinkMapJson( $linkText );
 t_assert( strpos( $linkMapJson, '"Main_Page":' ) !== false,
     'E4S1T3 link map: JSON keeps the normalized key' );
+// The renderer's `\s` includes Unicode spaces, so the server key must too.
+$nbspMap = HomebreweryWiki::brewLinkMap( "[[Caf\xC2\xA0Page]]\n[[_Private Page]]\n" );
+t_assert( isset( $nbspMap['Caf_Page'] ),
+    'E4S1T3 link map: a non-breaking space normalizes like the renderer' );
+t_assert( isset( $nbspMap['_Private_Page'] ),
+    'E4S1T3 link map: a literal leading underscore is preserved' );
 $linkMapCode = HomebreweryWiki::brewLinkMap( "`[[Hidden Page]]`\n\n[[Shown Page]]\n" );
 t_assert( !isset( $linkMapCode['Hidden_Page'] ) && isset( $linkMapCode['Shown_Page'] ),
     'E4S1T3 link map: code spans never donate a target' );
