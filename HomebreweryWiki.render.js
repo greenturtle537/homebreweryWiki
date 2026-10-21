@@ -597,7 +597,7 @@
      *
      * @param {string} target Token target (before the first `|`).
      * @param {Array.<string>} args Token arguments.
-     * @param {Object} config `{ base: string, files: Object }`.
+     * @param {Object} config `{ base: string, files: Object, links: Object }`.
      * @return {string} Replacement HTML, or the token when unrecognised.
      */
     function wikiTokenHtml( target, args, config ) {
@@ -607,6 +607,8 @@
         var alt;
         var size;
         var src;
+        var key;
+        var exists;
         var i;
 
         if ( lower.indexOf( 'category:' ) === 0 ) {
@@ -651,9 +653,17 @@
         if ( !config.base ) {
             return '[[' + target + ( args.length ? '|' + args.join( '|' ) : '' ) + ']]';
         }
-        return '<a href="' + escapeHtml( config.base + encodeURIComponent(
-            target.replace( / /g, '_' )
-        ) ) + '" target="_top" rel="noopener noreferrer">' +
+        // E4S1T3: the parent resolves each target's existence (the iframe
+        // runs no scripts and cannot query the wiki).  Only a target the
+        // parent positively reports as absent becomes a red link; an unknown
+        // target keeps the plain link rather than inventing a red one.
+        key = target.replace( /\s+/g, '_' );
+        exists = config.links && Object.prototype.hasOwnProperty.call(
+            config.links, key
+        ) ? config.links[ key ] : null;
+        return '<a href="' + escapeHtml( config.base + encodeURIComponent( key ) ) +
+            '" target="_top" rel="noopener noreferrer"' +
+            ( exists === false ? ' class="new"' : '' ) + '>' +
             escapeHtml( args.length && args[ 0 ] ? args[ 0 ] : target ) + '</a>';
     }
 
@@ -1524,7 +1534,8 @@
         theme = host.getAttribute( 'data-hbw-theme' ) || '';
         wikiConfig = {
             base: host.getAttribute( 'data-hbw-wiki-base' ) || '',
-            files: {}
+            files: {},
+            links: {}
         };
         try {
             wikiConfig.files = JSON.parse(
@@ -1532,6 +1543,13 @@
             ) || {};
         } catch ( e ) {
             wikiConfig.files = {};
+        }
+        try {
+            wikiConfig.links = JSON.parse(
+                host.getAttribute( 'data-hbw-links' ) || '{}'
+            ) || {};
+        } catch ( e ) {
+            wikiConfig.links = {};
         }
         frame = createFrame();
 

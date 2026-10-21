@@ -720,6 +720,92 @@ t_assert( array_key_exists( 'url', $fileMap['HbwTestMissing.png'] ) &&
     is_string( $fileMap['HbwTestMissing.png']['url'] ),
     'E3.5 file map: each entry carries a url string' );
 
+// --- E4S1T3: link existence map (blue vs red) ---
+$linkMap = HomebreweryWiki::brewLinkMap( $linkText );
+$expectedMain = Title::newFromText( 'Main Page' )->exists();
+t_assert( isset( $linkMap['Main_Page'] ) && $linkMap['Main_Page'] === $expectedMain,
+    'E4S1T3 link map: existence matches Title::exists()' );
+t_assert( isset( $linkMap['Page_Two'] ) && $linkMap['Page_Two'] === false,
+    'E4S1T3 link map: a missing target reports exists=false' );
+t_assert( !isset( $linkMap['E35_Test'] ) && !isset( $linkMap['Name.png'] ),
+    'E4S1T3 link map: categories and files stay out of the map' );
+$linkMapJson = HomebreweryWiki::brewLinkMapJson( $linkText );
+t_assert( strpos( $linkMapJson, '"Main_Page":' ) !== false,
+    'E4S1T3 link map: JSON keeps the normalized key' );
+// The renderer's `\s` includes Unicode spaces, so the server key must too.
+$nbspMap = HomebreweryWiki::brewLinkMap( "[[Caf\xC2\xA0Page]]\n[[_Private Page]]\n" );
+t_assert( isset( $nbspMap['Caf_Page'] ),
+    'E4S1T3 link map: a non-breaking space normalizes like the renderer' );
+t_assert( isset( $nbspMap['_Private_Page'] ),
+    'E4S1T3 link map: a literal leading underscore is preserved' );
+$specialMap = HomebreweryWiki::brewLinkMap( "[[Special:RecentChanges]]\n" );
+t_assert( !isset( $specialMap['Special:RecentChanges'] ),
+    'E4S1T3 link map: Special pages stay out of the existence map' );
+$linkMapCode = HomebreweryWiki::brewLinkMap( "`[[Hidden Page]]`\n\n[[Shown Page]]\n" );
+t_assert( !isset( $linkMapCode['Hidden_Page'] ) && isset( $linkMapCode['Shown_Page'] ),
+    'E4S1T3 link map: code spans never donate a target' );
+
+// --- E4S4T1: readable search snippets from brew markdown ---
+$snippetSource = "# Brew Heading\n\n"
+    . "See [[Page|the label]] and [[Page Two]].\n\n"
+    . "[[Category:E4S4 Test]]\n\n"
+    . "[[File:Map.png|alt text|caption|200px]]\n\n"
+    . "**bold** and *italic* and `inline code`.\n\n"
+    . "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+    . "\\page\n\n"
+    . "[^n]: note body\n\n"
+    . "Ref[^n]\n";
+$snippet = HomebreweryWiki::brewSnippetText( $snippetSource );
+t_assert( strpos( $snippet, 'Brew Heading' ) !== false &&
+    strpos( $snippet, '#' ) === false,
+    'E4S4 snippet: heading hash is stripped' );
+t_assert( strpos( $snippet, 'the label' ) !== false &&
+    strpos( $snippet, '[[' ) === false,
+    'E4S4 snippet: wiki link keeps its label, drops the syntax' );
+t_assert( strpos( $snippet, 'Category:' ) === false &&
+    strpos( $snippet, 'Map.png' ) === false,
+    'E4S4 snippet: categories and files contribute nothing' );
+t_assert( strpos( $snippet, 'bold' ) !== false &&
+    strpos( $snippet, '**' ) === false &&
+    strpos( $snippet, 'inline code' ) !== false,
+    'E4S4 snippet: emphasis and code keep their text' );
+t_assert( strpos( $snippet, '\\page' ) === false,
+    'E4S4 snippet: split markers are removed' );
+t_assert( strpos( $snippet, 'note body' ) !== false &&
+    strpos( $snippet, '[^n]' ) === false,
+    'E4S4 snippet: footnote body survives, marker does not' );
+t_assert( strpos( $snippet, '|---|---|' ) === false &&
+    strpos( $snippet, '|' ) === false,
+    'E4S4 snippet: table syntax is flattened' );
+
+$snippetRow = (object) array(
+    'page_namespace' => NS_MANUAL,
+    'page_title' => 'E4S4 Snippet ' . uniqid()
+);
+$snippetResult = new HomebreweryWiki_SearchResult( $snippetRow );
+$snippetResult->mText = "# Brew Heading\n\nSee [[Page|the label]].\n";
+$renderedSnippet = $snippetResult->getTextSnippet( array( 'Brew' ) );
+t_assert( strpos( $renderedSnippet, 'Brew' ) !== false &&
+    strpos( $renderedSnippet, 'Heading' ) !== false &&
+    strpos( $renderedSnippet, '[[' ) === false,
+    'E4S4 search: a brew result highlights readable text' );
+t_assert( $wgSearchType !== 'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: non-MySQL harness keeps its own engine' );
+t_assert( HomebreweryWiki::brewSearchEngine( 'SearchMySQL', 'mysql' ) ===
+    'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: an explicit MySQL engine is subclassed' );
+t_assert( HomebreweryWiki::brewSearchEngine( 'MySQLSearch', 'sqlite' ) ===
+    'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: the MySQLSearch alias is subclassed' );
+t_assert( HomebreweryWiki::brewSearchEngine( '', 'mysql' ) ===
+    'HomebreweryWiki_SearchMySQL',
+    'E4S4 search: the MySQL database default is subclassed' );
+t_assert( HomebreweryWiki::brewSearchEngine( '', 'postgres' ) === '',
+    'E4S4 search: the PostgreSQL database default is preserved' );
+t_assert( HomebreweryWiki::brewSearchEngine( 'LuceneSearch', 'mysql' ) ===
+    'LuceneSearch',
+    'E4S4 search: a third-party engine is preserved' );
+
 // --- E3.5S3: code spans and fences never donate source tokens ---
 $codeText = "`[[Category:Hidden]]` stays literal\n"
     . "\n"
@@ -781,6 +867,8 @@ t_assert( strpos( $phWiki, 'data-hbw-wiki-base="' ) !== false,
     'E3.5 placeholder: wiki base attribute emitted' );
 t_assert( strpos( $phWiki, 'data-hbw-files="' ) !== false,
     'E3.5 placeholder: file map attribute emitted' );
+t_assert( strpos( $phWiki, 'data-hbw-links="' ) !== false,
+    'E4S1T3 placeholder: link map attribute emitted' );
 t_assert( strpos( $phWiki, 'HbwTestMissing.png' ) !== false,
     'E3.5 placeholder: referenced file appears in the map' );
 
@@ -809,6 +897,13 @@ if ( $saveTitle instanceof Title ) {
 
     $pageId = $saveTitle->getArticleID();
     t_assert( $pageId > 0, 'E3.5 integration: saved page has an id' );
+
+    // E4S1T3: a saved page exists, so a link to it resolves blue.
+    $selfMap = HomebreweryWiki::brewLinkMap( '[[' . $saveTitle->getPrefixedText() . ']]' );
+    t_assert(
+        $selfMap[ str_replace( ' ', '_', $saveTitle->getPrefixedText() ) ] === true,
+        'E4S1T3 link map: a page that exists reports exists=true'
+    );
 
     $db = wfGetDB( DB_MASTER );
     // categorylinks stores the DB key (underscores), not the display name.

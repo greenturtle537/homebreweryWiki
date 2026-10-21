@@ -47,6 +47,16 @@ body {
 .hbw-footnote-back {
     text-decoration: none;
 }
+/* Red link (E4S1T3): the parent reports a missing target, and the reader
+ * gets the wiki convention rather than a link that looks valid. */
+a.new,
+/* Theme components (`.toc`, `.artist`) set `color: inherit` on their anchors
+ * with two-class specificity, so the plain `a.new` rule would lose there. */
+.brewRenderer .page a.new,
+.brewRenderer .page .toc a.new,
+.brewRenderer .page .artist a.new {
+    color: #ba0000;
+}
 /* Missing upload (E3.5S3T3): visible placeholder, never a broken image. */
 .hbw-missing-file {
     display: inline-block;

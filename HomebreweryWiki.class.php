@@ -560,6 +560,149 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Existence map for the wiki-link targets in brew source (E4S1T3).
+	 *
+	 * The renderer runs inside a script-free iframe, so it cannot ask the
+	 * server whether a target exists; the parent supplies the answer with the
+	 * placeholder.  Keys are the target titles with whitespace collapsed to
+	 * underscores, matching the href the renderer emits.  A target MediaWiki
+	 * cannot resolve at all is reported as missing, which is what the red
+	 * link promises.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return array Map of normalized target title => boolean exists.
+	 */
+	public static function brewLinkMap( $text ) {
+		$map = array();
+		foreach ( self::brewLinkTargets( $text ) as $target ) {
+			// Match the renderer's `\s+ -> _` key exactly.  JavaScript's
+			// `\s` includes Unicode spaces (NBSP, thin space, ...); PHP's
+			// ASCII `\s` does not, so add the Unicode separator class.  A
+			// malformed target falls back to the ASCII rule rather than
+			// producing a null key.
+			// Resolve the title once and use it for both tests below.  A
+			// literal `Special:` prefix is not enough on 1.14: the namespace
+			// is localised (e.g. `Spezial:`), so ask Title for the namespace.
+			// Special pages have no stored row, so Title::exists() reports
+			// them missing and the renderer would draw a valid link red.
+			$title = null;
+			if ( class_exists( 'Title' ) ) {
+				$title = Title::newFromText( $target );
+			}
+			if ( $title instanceof Title && $title->getNamespace() === NS_SPECIAL ) {
+				continue;
+			}
+			$normalized = preg_replace( '/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $target );
+			if ( $normalized === null ) {
+				$normalized = trim( $target );
+			}
+			$key = preg_replace( '/[\s\p{Z}]+/u', '_', $normalized );
+			if ( $key === null ) {
+				$key = preg_replace( '/\s+/', '_', $normalized );
+			}
+			$exists = ( $title instanceof Title && $title->exists() );
+			$map[$key] = $exists;
+		}
+		return $map;
+	}
+
+	/**
+	 * JSON form of the wiki-link existence map (E4S1T3).
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return string JSON object, safe to place in an HTML attribute.
+	 */
+	public static function brewLinkMapJson( $text ) {
+		$map = self::brewLinkMap( $text );
+		if ( !function_exists( 'json_encode' ) ) {
+			return '{}';
+		}
+		$json = json_encode( $map );
+		return ( $json === false ) ? '{}' : $json;
+	}
+
+	/**
+	 * Pick the search engine for this site (E4S4T1).
+	 *
+	 * Clean snippets need the MySQL result subclass.  MediaWiki 1.14.1
+	 * chooses its engine from the database when $wgSearchType is empty,
+	 * so only override when that choice is MySQL, or when the site already
+	 * names the core MySQL engine.  PostgreSQL and SQLite sites keep their
+	 * own engine and its database-specific queries.
+	 *
+	 * @param mixed $engine Current $wgSearchType.
+	 * @param mixed $dbType Current $wgDBtype.
+	 * @return mixed Engine name to use.
+	 */
+	public static function brewSearchEngine( $engine, $dbType ) {
+		if ( $engine === 'SearchMySQL' || $engine === 'MySQLSearch' ) {
+			return 'HomebreweryWiki_SearchMySQL';
+		}
+		if ( ( $engine === null || $engine === '' ) && $dbType === 'mysql' ) {
+			return 'HomebreweryWiki_SearchMySQL';
+		}
+		return $engine;
+	}
+
+	/**
+	 * Readable text for a brew revision, used for search snippets (E4S4T1).
+	 *
+	 * MediaWiki builds a snippet from the stored revision text, which for a
+	 * brew is markdown.  This strips the syntax that carries no meaning in a
+	 * result list - heading hashes, fences, split markers, table pipes,
+	 * emphasis - and keeps what a reader would see: link labels, image alt
+	 * text, inline-code content and prose.  Categories and embedded files
+	 * contribute nothing; a footnote definition keeps its body.
+	 *
+	 * Best-effort by design (Q5: no server-side rendering for MVP); it must
+	 * never throw or return markup, so every step is a plain substitution.
+	 *
+	 * @param mixed $text Raw brew markdown.
+	 * @return string Plain text, single-spaced.
+	 */
+	public static function brewSnippetText( $text ) {
+		if ( !is_string( $text ) ) {
+			return '';
+		}
+		$text = str_replace( array( "\r\n", "\r" ), "\n", $text );
+		// Footnote definitions first (their marker is syntax), then references.
+		$text = preg_replace( '/^[ \t]*\[\^[^\]\s]+\][ \t]*:[ \t]*/m', '', $text );
+		$text = preg_replace( '/\[\^[^\]\s]+\]/', '', $text );
+		// Fence lines and Homebrewery split markers are layout, not prose.
+		$text = preg_replace( '/^[ \t]*(?:`{3,}|~{3,})[^\n]*$/m', '', $text );
+		$text = preg_replace( '/^[ \t]*\\\\(?:page|pagebreak|column|columnbreak)\b[^\n]*$/mi', '', $text );
+		// Wiki tokens: categories and files carry no readable text; a piped
+		// link contributes its label, a bare one its target.
+		$text = preg_replace( '/\[\[Category:[^\]|]*(?:\|[^\]]*)?\]\]/i', '', $text );
+		$text = preg_replace( '/\[\[File:[^\]|]*(?:\|[^\]]*)?\]\]/i', '', $text );
+		$text = preg_replace( '/\[\[([^\]|]+)\|([^\]]*)\]\]/', '$2', $text );
+		$text = preg_replace( '/\[\[([^\]|]+)\]\]/', '$1', $text );
+		// Markdown images keep their alt text; links keep their label.
+		$text = preg_replace( '/!\[([^\]]*)\]\([^)]*\)/', '$1', $text );
+		$text = preg_replace( '/\[([^\]]+)\]\([^)]*\)/', '$1', $text );
+		// Inline code keeps its content; Homebrewery spans keep their text.
+		$text = preg_replace( '/`+([^`]*)`+/', '$1', $text );
+		$text = preg_replace( '/\{\{([^{}]*)\}\}/', '$1', $text );
+		// Block syntax: heading hashes, quotes, list bullets.
+		$text = preg_replace( '/^[ \t]*#{1,6}[ \t]*/m', '', $text );
+		$text = preg_replace( '/^[ \t]*>[ \t]?/m', '', $text );
+		$text = preg_replace( '/^[ \t]*(?:[-*+]|\d+\.)[ \t]+/m', '', $text );
+		// Emphasis markers.
+		$text = preg_replace( '/(\*\*|__)([^\n]*?)\1/', '$2', $text );
+		$text = preg_replace( '/(?<![\w*])\*([^*\n]+)\*(?!\w)/', '$1', $text );
+		// Table separator rows and cell pipes.
+		$text = preg_replace( '/^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$/m', '', $text );
+		$text = str_replace( '|', ' ', $text );
+		// Anything left that looks like a tag is not readable text.
+		$text = strip_tags( $text );
+		$text = html_entity_decode( $text, ENT_QUOTES, 'UTF-8' );
+		// Collapse layout whitespace into one readable paragraph.
+		$text = preg_replace( '/[ \t]+/', ' ', $text );
+		$text = preg_replace( '/\s*\n\s*/', ' ', $text );
+		return trim( $text );
+	}
+
+	/**
 	 * Resolve `[[File:...]]` tokens to same-origin upload URLs (E3.5S3T3).
 	 *
 	 * The client cannot derive MediaWiki's hashed upload paths, so the server
@@ -936,7 +1079,8 @@ class HomebreweryWiki {
                . ' data-hbw-page-width="215.9"'
                . ' data-hbw-page-height="279.4"'
                . ' data-hbw-wiki-base="' . htmlspecialchars( self::wikiBaseUrl(), ENT_QUOTES, 'UTF-8' ) . '"'
-               . ' data-hbw-files="' . htmlspecialchars( self::brewFileMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"';
+               . ' data-hbw-files="' . htmlspecialchars( self::brewFileMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"'
+               . ' data-hbw-links="' . htmlspecialchars( self::brewLinkMapJson( $text ), ENT_QUOTES, 'UTF-8' ) . '"';
         if ( $print ) {
             $attrs .= ' data-hbw-print="1"';
         }
