@@ -659,10 +659,14 @@
         // E4B5: the first `#` separates the page title from the anchor.
         // Percent-encoding it into the title parameter produces a link to a
         // page literally named "Page#Section", and the browser never scrolls
-        // to the section, so the two parts are encoded separately.
+        // to the section, so the two parts are encoded separately.  The page
+        // part is trimmed here because brewLinkMap() trims on the server;
+        // `[[Missing #Part]]` must key `Missing`, not `Missing_`, so the
+        // red-link styling survives.
         anchor = '';
         hash = target.indexOf( '#' );
-        page = ( hash === -1 ) ? target : target.substring( 0, hash );
+        page = ( ( hash === -1 ) ? target : target.substring( 0, hash ) )
+            .replace( /^\s+|\s+$/g, '' );
         if ( hash !== -1 ) {
             anchor = target.substring( hash + 1 ).replace( /^\s+|\s+$/g, '' );
         }
@@ -978,13 +982,95 @@
     }
 
     /**
+     * Normalise a same-page anchor candidate for matching, ignoring the
+     * cosmetic separators the renderers slug differently (spaces, `_`, `-`
+     * and surrounding punctuation).  Lowercase; runs collapse to one `-`.
+     *
+     * @param {string} text heading text, heading id, or fragment
+     * @return {string}
+     */
+    function anchorKey( text ) {
+        return String( text )
+            .toLowerCase()
+            .replace( /^[\s_\-]+|[\s_\-]+$/g, '' )
+            .replace( /[\s_\-]+/g, '-' );
+    }
+
+    /**
+     * E4B5 review fix: a bare `[[#Section]]` (or a `[text](#section)` link)
+     * is same-page, so its href must point at the anchor the ACTIVE
+     * renderer just emitted.  Wiki tokens are applied *before* the markdown
+     * render (see renderPages), so the anchored heading's id does not exist
+     * when the token becomes an `<a>`; predicting it in advance would mean
+     * replicating two materially different sluggers (the pinned
+     * Homebrewery renderer builds unicode-aware ids like `caffè--cream`
+     * with `-N` dedupe suffixes, while the marked 0.3.19 fallback emits
+     * ASCII-only `caff-cream-` with none).  Instead the rendered page is
+     * resolved in one pass against its own headings: the fragment matches
+     * the first heading by text (falling back to an explicit id match) and
+     * the href is rewritten to that heading's real id.  A fragment with no
+     * matching heading is left alone — a dead anchor is the author's
+     * problem, not a rewrite problem.
+     *
+     * @param {string} html sanitized rendered page HTML
+     * @return {string}
+     */
+    function resolveSamePageAnchors( html ) {
+        var box = document.createElement( 'div' );
+        var headings;
+        var keys = {};
+        var headingIds = {};
+        var anchors;
+        var resolved;
+        var key;
+        var fragment;
+        var i;
+
+        box.innerHTML = html;
+        anchors = box.querySelectorAll( 'a[href^="#"]' );
+        if ( !anchors.length ) {
+            return html;
+        }
+        headings = box.querySelectorAll( 'h1, h2, h3, h4, h5, h6' );
+        for ( i = 0; i < headings.length; i++ ) {
+            if ( !headings[ i ].id ) {
+                continue;
+            }
+            key = anchorKey( headings[ i ].textContent );
+            if ( key && !keys.hasOwnProperty( key ) ) {
+                keys[ key ] = headings[ i ].id;
+            }
+            key = anchorKey( headings[ i ].id );
+            if ( key && !headingIds.hasOwnProperty( key ) ) {
+                headingIds[ key ] = headings[ i ].id;
+            }
+        }
+        for ( i = 0; i < anchors.length; i++ ) {
+            try {
+                // The emitter percent-encodes the fragment; the heading ids
+                // are plain.  Decode so both sides compare equal.
+                fragment = decodeURIComponent( anchors[ i ].getAttribute( 'href' ).substring( 1 ) );
+            } catch ( e ) {
+                fragment = anchors[ i ].getAttribute( 'href' ).substring( 1 );
+            }
+            key = anchorKey( fragment );
+            resolved = keys[ key ] || headingIds[ key ];
+            if ( resolved ) {
+                anchors[ i ].setAttribute( 'href', '#' + resolved );
+            }
+        }
+        return box.innerHTML;
+    }
+
+    /**
      * Render pages to sanitized HTML (E3S1 + E3S2T1 + E3.5).
      *
      * A page is rendered in a single call so the pinned renderer's per-page
      * state (variable definitions, heading ids) spans both CSS columns.
      * Column breaks arrive as upstream `.columnSplit` elements.  Footnote
      * markers that landed inside fenced code are restored to source text
-     * after sanitizing (E3S3 review).
+     * after sanitizing (E3S3 review).  Same-page anchors are resolved
+     * against the page's rendered headings (E4B5 review).
      *
      * @param {Array.<string>} pages page sources
      * @param {Object.<string, string>} footnoteNotes footnote bodies by label
@@ -1007,7 +1093,7 @@
             if ( html === null ) {
                 return null;
             }
-            renderedPages.push( html );
+            renderedPages.push( resolveSamePageAnchors( html ) );
         }
 
         return renderedPages;

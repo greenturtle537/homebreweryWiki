@@ -1552,6 +1552,71 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'wiki fragment: no console errors' );
 }() );
 
+// --- E4B5: a spaced page title trims before the existence lookup ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var page = makePage( '# T\n\nSee [[Missing #Part|space]].\n', {
+        withHomebrewery: true,
+        wikiBase: base,
+        links: { 'Missing': false }
+    } );
+    var rendered = renderRoot( page );
+    var anchor = rendered ? rendered.querySelector(
+        'a[href="' + base + 'Missing#Part"]'
+    ) : null;
+
+    ok( !!anchor && ( ' ' + anchor.className + ' ' ).indexOf( ' new ' ) !== -1,
+        'wiki fragment: a spaced title still styles its missing page red' );
+    ok( page.errors.length === 0, 'wiki fragment: no console errors (trim)' );
+}() );
+
+// --- E4B5 review: a bare [[#Heading]] resolves to the ACTIVE renderer's id.
+// The two vendored renderers slug headings differently: the pinned bundle
+// keeps non-ASCII and emits `caffè--cream`; the marked fallback folds to
+// ASCII and emits `caff-cream-`.  Both paths must land their own id.
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Chapter One\n\n## Caffè & Cream!\n\n'
+        + 'see [[#Chapter One|up]] and [[#Caffè & Cream!]]\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base
+    } );
+    var rendered = renderRoot( page );
+
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' )
+            .indexOf( 'homebrewery-' ) === 0,
+        'heading anchors: pinned renderer in use' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#chapter-one"]' ),
+        'heading anchors (pinned): #Chapter One resolves to the emitted id' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#caffè--cream"]' ),
+        'heading anchors (pinned): #Caffè & Cream! resolves to its unicode id' );
+    ok( !!rendered && !rendered.querySelector( 'a[href="#Caffè_&_Cream!"]' ),
+        'heading anchors (pinned): the raw fragment is rewritten' );
+    ok( !!rendered && !!rendered.querySelector( 'h2#caffè--cream' ),
+        'heading anchors (pinned): the link points at a real heading' );
+    ok( page.errors.length === 0, 'heading anchors (pinned): no console errors' );
+}() );
+
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Chapter One\n\n## Caffè & Cream!\n\n'
+        + 'see [[#Chapter One|up]] and [[#Caffè & Cream!]]\n';
+    var page = makePage( source, { wikiBase: base } ); // no pinned bundle: marked fallback
+    var rendered = renderRoot( page );
+
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
+        'heading anchors: marked fallback in use' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#chapter-one"]' ),
+        'heading anchors (marked): #Chapter One resolves to the emitted id' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#caff-cream-"]' ) &&
+        !rendered.querySelector( 'a[href="#caffè--cream"]' ),
+        'heading anchors (marked): #Caffè & Cream! resolves to its ASCII id' );
+    ok( !!rendered && !!rendered.querySelector( 'h2#caff-cream-' ),
+        'heading anchors (marked): the link points at a real heading' );
+    ok( page.errors.length === 0, 'heading anchors (marked): no console errors' );
+}() );
+
 // --- E3.5S3 T1: wiki tokens inside inline code stay literal ---
 ( function () {
     var base = 'http://wiki.example.test/index.php?title=';
