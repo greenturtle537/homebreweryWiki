@@ -1018,8 +1018,11 @@
     function resolveSamePageAnchors( html ) {
         var box = document.createElement( 'div' );
         var headings;
-        var keys = {};
-        var headingIds = {};
+        // Prototype-less maps: a fragment such as `[[#constructor]]` or
+        // `[[#__proto__]]` must never hit an inherited Object property.
+        var exactIds = Object.create( null );
+        var keys = Object.create( null );
+        var headingIds = Object.create( null );
         var anchors;
         var resolved;
         var key;
@@ -1036,12 +1039,18 @@
             if ( !headings[ i ].id ) {
                 continue;
             }
+            // An emitted id always wins over a normalized key: a page may
+            // carry both `target-section` and `target_section`, and the
+            // fragment that names the second exactly must reach it.
+            if ( !( headings[ i ].id in exactIds ) ) {
+                exactIds[ headings[ i ].id ] = headings[ i ].id;
+            }
             key = anchorKey( headings[ i ].textContent );
-            if ( key && !keys.hasOwnProperty( key ) ) {
+            if ( key && !( key in keys ) ) {
                 keys[ key ] = headings[ i ].id;
             }
             key = anchorKey( headings[ i ].id );
-            if ( key && !headingIds.hasOwnProperty( key ) ) {
+            if ( key && !( key in headingIds ) ) {
                 headingIds[ key ] = headings[ i ].id;
             }
         }
@@ -1053,8 +1062,12 @@
             } catch ( e ) {
                 fragment = anchors[ i ].getAttribute( 'href' ).substring( 1 );
             }
-            key = anchorKey( fragment );
-            resolved = keys[ key ] || headingIds[ key ];
+            if ( fragment in exactIds ) {
+                resolved = exactIds[ fragment ];
+            } else {
+                key = anchorKey( fragment );
+                resolved = ( key && ( keys[ key ] || headingIds[ key ] ) ) || '';
+            }
             if ( resolved ) {
                 anchors[ i ].setAttribute( 'href', '#' + resolved );
             }

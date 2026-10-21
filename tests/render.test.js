@@ -1617,6 +1617,44 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'heading anchors (marked): no console errors' );
 }() );
 
+// --- E4B5 review: fragments that collide with Object.prototype stay dead,
+// and an exact emitted id beats a normalized key.
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Chapter One\n\n'
+        + 'see [[#constructor]], [[#__proto__]] and [[#toString]]\n';
+    var page = makePage( source, { withHomebrewery: true, wikiBase: base } );
+    var rendered = renderRoot( page );
+    var proto = rendered ? rendered.querySelector( 'a[href="#__proto__"]' ) : null;
+
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#constructor"]' ),
+        'anchor safety: #constructor is left unresolved, not the Object constructor' );
+    ok( !!proto, 'anchor safety: #__proto__ is left unresolved' );
+    ok( !!rendered && !/[a-z]+ Object\(\)|native code/.test(
+        rendered.innerHTML
+    ), 'anchor safety: no inherited property leaked into an href' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#toString"]' ),
+        'anchor safety: an inherited name keeps its literal fragment' );
+    ok( !!rendered && !rendered.querySelector( 'a[href="#tostring"]' ),
+        'anchor safety: an inherited name is not slugged into a heading' );
+    ok( page.errors.length === 0, 'anchor safety: no console errors' );
+}() );
+
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '<h2 id="target-section">First</h2>\n\n'
+        + '<h2 id="target_section">Second</h2>\n\n'
+        + 'go [[#target_section]]\n';
+    var page = makePage( source, { wikiBase: base } ); // marked fallback
+    var rendered = renderRoot( page );
+
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#target_section"]' ),
+        'anchor exactness: an exact emitted id wins over the normalized key' );
+    ok( !!rendered && !rendered.querySelector( 'a[href="#target-section"]' ),
+        'anchor exactness: the colliding heading is not chosen' );
+    ok( page.errors.length === 0, 'anchor exactness: no console errors' );
+}() );
+
 // --- E3.5S3 T1: wiki tokens inside inline code stay literal ---
 ( function () {
     var base = 'http://wiki.example.test/index.php?title=';
