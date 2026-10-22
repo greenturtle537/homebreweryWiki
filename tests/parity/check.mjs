@@ -31,7 +31,11 @@ const fixtures = [
         // Page 1 is the page that overruns; naming it keeps the check from
         // accepting a flag on any other page.
         overflowPages: [ 1 ], upstream: false
-    }
+    },
+    // E4B6: a leading css fence is page style. Recorded here for the same
+    // reason as `rich-brew`, and because the app's own style channel is the
+    // thing under test.
+    { name: 'styled-brew', marker: 'The Styled Sheet', overflow: false, upstream: false, style: true }
 ];
 const acceptGoldens = process.env.HBW_PARITY_ACCEPT === '1';
 
@@ -365,6 +369,22 @@ async function runFixture( browser, spec ) {
                         ( notice.compareDocumentPosition( frameEl ) & 4 ) === 4,
                     noticeInFrame: !!notice && !!doc && doc.contains( notice )
                 },
+                style: {
+                    state: hbwHost ? hbwHost.getAttribute( 'data-hbw-style' ) : null,
+                    text: ( () => {
+                        const node = doc && doc.querySelector( 'style.hbw-page-style' );
+                        return node ? node.textContent : null;
+                    } )(),
+                    inHead: !!( doc && doc.head &&
+                        doc.head.querySelector( 'style.hbw-page-style' ) ),
+                    inHost: !!( hbwHost && hbwHost.querySelector( 'style.hbw-page-style' ) ),
+                    paddingBottom: pages.length
+                        ? getComputedStyle( pages[ 0 ] ).paddingBottom
+                        : null,
+                    pre: pages.reduce( ( total, pageNode ) => {
+                        return total + pageNode.querySelectorAll( 'pre' ).length;
+                    }, 0 )
+                },
                 nodes: pages.map( ( pageNode ) => {
                     const select = ( selector ) => pageNode.querySelectorAll( selector ).length;
                     return {
@@ -456,6 +476,29 @@ async function runFixture( browser, spec ) {
                 JSON.stringify( info.overflow.flags ) + ')' );
             pass( info.overflow.notice === null,
                 spec.name + ': no overflow notice for a brew that fits' );
+        }
+
+        // Leading css fence as page style (E4B6).
+        if ( spec.style ) {
+            pass( info.style.state === 'applied',
+                spec.name + ': the css fence is reported as applied (got ' +
+                JSON.stringify( info.style.state ) + ')' );
+            pass( !!info.style.text && info.style.text.indexOf( 'padding-bottom' ) !== -1,
+                spec.name + ': the fence body reaches the frame stylesheet' );
+            pass( info.style.inHead && !info.style.inHost,
+                spec.name + ': the stylesheet lives in the frame head, not the wiki page' );
+            pass( Math.abs( parseFloat( info.style.paddingBottom ) - 41.5748 ) < 1,
+                spec.name + ': the page honours the fence padding-bottom (' +
+                JSON.stringify( info.style.paddingBottom ) + ', want 41.57px)' );
+            pass( info.style.pre === 0,
+                spec.name + ': the fence is not rendered as a code block (' +
+                info.style.pre + ' pre)' );
+        } else {
+            pass( info.style.state === null && info.style.text === null,
+                spec.name + ': no page stylesheet without a css fence' );
+            pass( Math.abs( parseFloat( info.style.paddingBottom ) - 64.252 ) < 1,
+                spec.name + ': an unstyled brew keeps the theme padding (' +
+                JSON.stringify( info.style.paddingBottom ) + ')' );
         }
 
         pass( assetFailures.length === 0,
