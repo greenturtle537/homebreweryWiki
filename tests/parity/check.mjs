@@ -418,6 +418,13 @@ async function runFixture( browser, spec ) {
             pass( flagged.length >= 1,
                 spec.name + ': at least one page is flagged as overflowing (' +
                 JSON.stringify( info.overflow.flags ) + ')' );
+            // A regression that shifted the flag onto the wrong page would
+            // still satisfy the checks below, because they follow the flag.
+            pass( ( spec.overflowPages || [] ).every( ( index ) =>
+                Number( info.overflow.flags[ index - 1 ] ) >= 2 ),
+                spec.name + ': the pages that overrun are the flagged ones ' +
+                JSON.stringify( spec.overflowPages || [] ) + ' (got ' +
+                JSON.stringify( info.overflow.flags ) + ')' );
             pass( info.overflow.host === flagged.join( ',' ),
                 spec.name + ': host carries the overflowing page numbers (got ' +
                 JSON.stringify( info.overflow.host ) + ', want ' +

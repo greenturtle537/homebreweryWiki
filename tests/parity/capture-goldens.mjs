@@ -7,13 +7,15 @@ import { chromium } from 'playwright';
 const here = path.dirname( fileURLToPath( import.meta.url ) );
 const root = path.resolve( here, '..', '..' );
 /**
- * Fixtures whose upstream pages become goldens. Keep in step with
- * tests/parity/check.mjs: each name must match a `tests/fixtures/<name>.md`
- * and a `marker` the page stack must contain before capture.
+ * Fixtures whose upstream pages become goldens. Only fixtures the app can
+ * render faithfully belong here: `rich-brew` is recorded from this renderer,
+ * because the app's stored style tab changes a full page's column height (see
+ * tests/parity/README.md). Capturing it from the app would silently replace a
+ * correct golden with a wrong one; refresh it with
+ * `HBW_PARITY_ACCEPT=1 npm run parity` instead.
  */
 const fixtures = [
-    { name: 'three-page-brew', marker: 'Page Three' },
-    { name: 'rich-brew', marker: 'After the Break' }
+    { name: 'three-page-brew', marker: 'Page Three' }
 ];
 const site = 'https://homebrewery.naturalcrit.com';
 const outIndex = process.argv.indexOf( '--out' );
