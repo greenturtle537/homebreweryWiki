@@ -2144,6 +2144,21 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'E4B6: the brew body follows the fence unchanged' );
 }() );
 
+// --- E4B6: an escape is not a way around the refusal list ---
+( function () {
+    // A legitimate escape stays legitimate: refusing every backslash would
+    // throw out `content: "\\2014"` along with the tricks.
+    var page = makePage(
+        '```css\n.page::after { content : "\\2014"; }\n```\n\n# Title\n\nBody.\n'
+    );
+    var doc = frameDocOf( page );
+    ok( !!hostOf( page ) && hostOf( page ).getAttribute( 'data-hbw-style' ) === 'applied',
+        'E4B6: a harmless escape does not refuse the block' );
+    ok( !!doc && !!doc.querySelector( 'style.hbw-page-style' ) &&
+        doc.querySelector( 'style.hbw-page-style' ).textContent.indexOf( '\\2014' ) !== -1,
+        'E4B6: the escaped rule is applied as written' );
+}() );
+
 // --- E4B6: a fence is only lifted where markdown would treat it as one ---
 ( function () {
     var midBrew = makePage(
@@ -2157,9 +2172,19 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     ok( !!renderRoot( midBrew ) && !!renderRoot( midBrew ).querySelector( 'pre code' ),
         'E4B6: a mid-brew fence stays a code block' );
 
-    var infoString = makePage( '# Title\n\n```js\nalert( 1 );\n```\n' );
+    var infoString = makePage( '```js\nalert( 1 );\n```\n\n# Title\n' );
     ok( !!hostOf( infoString ) && hostOf( infoString ).getAttribute( 'data-hbw-style' ) === null,
         'E4B6: a leading fence with another language stays code' );
+    ok( !!renderRoot( infoString ) && !!renderRoot( infoString ).querySelector( 'pre code' ),
+        'E4B6: a leading js fence remains a code block' );
+
+    // A tab is four columns of indentation, so this opens an indented code
+    // block, not a fence: its body must not become the page stylesheet.
+    var tabbed = makePage( '\t```css\n.page { color : red; }\n```\n\n# Title\n' );
+    ok( !!hostOf( tabbed ) && hostOf( tabbed ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: a tab-indented fence is not page style' );
+    ok( !!frameDocOf( tabbed ) && !frameDocOf( tabbed ).querySelector( 'style.hbw-page-style' ),
+        'E4B6: a tab-indented fence injects nothing' );
 
     var unclosed = makePage( '```css\n.page { color : red; }\n' );
     ok( !!hostOf( unclosed ) && hostOf( unclosed ).getAttribute( 'data-hbw-style' ) === null,
@@ -2171,7 +2196,10 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     var cases = [
         { name: '@import', css: '@import url( "//example.com/x.css" );\n.page { color : red; }' },
         { name: 'legacy binding', css: '.page { behavior : url( #default#userdata ); }' },
-        { name: 'closing tag', css: '.page { color : red; } </style><script>1</script>' }
+        { name: 'closing tag', css: '.page { color : red; } </style><script>1</script>' },
+        // A CSS parser reads `@\69mport` as `@import`; the guard must too.
+        { name: 'escaped @import', css: '@\\69mport url( "/theme.css" );\n.page { color : red; }' },
+        { name: 'escaped behavior', css: '.page { beh\\61vior : url( #x ); }' }
     ];
 
     cases.forEach( ( spec ) => {

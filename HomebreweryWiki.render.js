@@ -71,9 +71,14 @@
     var STYLE_ELEMENT_CLASS = 'hbw-page-style';
     /** Refuse an oversized block rather than paste it into the frame. */
     var STYLE_MAX_LENGTH = 32768;
-    /** Leading fence whose info string is `css`, per CommonMark. */
-    var STYLE_FENCE_OPEN = /^[ \t]{0,3}(`{3,}|~{3,})[ \t]*css[ \t]*$/i;
-    var STYLE_FENCE_CLOSE = /^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/;
+    /**
+     * Leading fence whose info string is `css`, per CommonMark: up to three
+     * spaces of indentation, never a tab. A tab is four columns of code
+     * indentation, so `\t ```css ` opens an indented code block and must stay
+     * a code sample rather than becoming the page's stylesheet.
+     */
+    var STYLE_FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*css[ \t]*$/i;
+    var STYLE_FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
     /**
      * Sandbox for the render host (E3.5S6).
@@ -1669,6 +1674,30 @@
     }
 
     /**
+     * Decode CSS escapes to their literal characters (E4B6).
+     *
+     * `@\69mport` is `@import` to a CSS parser, so the forbidden constructs
+     * have to be looked for after unescaping; otherwise a block is declared
+     * applied while the browser still loads what it asked for. Hex escapes
+     * are `\` + up to six hex digits + optional whitespace; any other
+     * escaped character stands for itself.
+     *
+     * @param {string} css stylesheet text
+     * @return {string} text with escapes resolved
+     */
+    function decodeCssEscapes( css ) {
+        return String( css || '' )
+            .replace( /\\([0-9a-fA-F]{1,6})[ \t\r\n\f]?/g, function ( match, hex ) {
+                var code = parseInt( hex, 16 );
+                if ( !( code > 0 && code <= 0xffff ) ) {
+                    return '';
+                }
+                return String.fromCharCode( code );
+            } )
+            .replace( /\\(.)/g, '$1' );
+    }
+
+    /**
      * Decide whether a brew stylesheet may be applied (E4B6).
      *
      * The frame is a sandboxed, script-free document, and its CSP already
@@ -1683,17 +1712,19 @@
      */
     function sanitizePageCss( css ) {
         var cleaned = String( css || '' );
+        var decoded;
 
         if ( cleaned.length > STYLE_MAX_LENGTH ) {
             return null;
         }
-        if ( /<\/style/i.test( cleaned ) ) {
+        decoded = decodeCssEscapes( cleaned );
+        if ( /<\/style/i.test( decoded ) ) {
             return null;
         }
-        if ( /@import|expression\s*\(|behavior\s*:|-moz-binding|javascript\s*:/i.test( cleaned ) ) {
+        if ( /@import|expression\s*\(|behavior\s*:|-moz-binding|javascript\s*:/i.test( decoded ) ) {
             return null;
         }
-        return /\S/.test( cleaned ) ? cleaned : '';
+        return /\S/.test( decoded ) ? cleaned : '';
     }
 
     /**
