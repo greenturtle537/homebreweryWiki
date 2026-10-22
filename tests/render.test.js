@@ -1971,12 +1971,47 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
             ok( !listDoc || !listDoc.querySelector( '.page pre' ),
                 'E4B4 ' + spec.name + ': list continuation is not code' );
 
+            // A heading ends its block, so an indented line straight after one
+            // is code with no blank line in between.
+            var heading = makePage(
+                '# Head\n    [^h]: inside code\n', spec.options
+            );
+            var headingDoc = frameDocOf( heading );
+            var headingCode = headingDoc ? headingDoc.querySelector( '.page pre code' ) : null;
+            ok( !!headingCode && headingCode.textContent.indexOf( '[^h]: inside code' ) !== -1,
+                'E4B4 ' + spec.name + ': code after a heading renders as code' );
+            ok( !headingDoc || !headingDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': code after a heading makes no note' );
+
+            // Four columns past a list item's content indent is a code block
+            // inside the item; four columns flat is just a continuation.
+            var nested = makePage(
+                '- item\n\n      [^n]: inside code\n', spec.options
+            );
+            var nestedDoc = frameDocOf( nested );
+            var nestedCode = nestedDoc ? nestedDoc.querySelector( '.page pre code' ) : null;
+            ok( !!nestedCode && nestedCode.textContent.indexOf( '[^n]: inside code' ) !== -1,
+                'E4B4 ' + spec.name + ': code inside a list item renders as code' );
+            ok( !nestedDoc || !nestedDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': code inside a list item makes no note' );
+
+            // A tab reaches column four after up to three spaces.
+            var tabbed = makePage(
+                'Code:\n\n   \t[^t]: inside code\n', spec.options
+            );
+            var tabbedDoc = frameDocOf( tabbed );
+            var tabbedCode = tabbedDoc ? tabbedDoc.querySelector( '.page pre code' ) : null;
+            ok( !!tabbedCode && tabbedCode.textContent.indexOf( '[^t]: inside code' ) !== -1,
+                'E4B4 ' + spec.name + ': space-then-tab indent is code' );
+            ok( !tabbedDoc || !tabbedDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': space-then-tab code makes no note' );
+
             // Wiki tokens inside an indented block are code: they stay
             // literal, exactly like tokens inside a fence.
             var token = makePage(
                 'Wiki sample:\n\n    [[Page Two]] and [[File:Name.png]]\n',
                 {
-                    withHomebrewery: true,
+                    withHomebrewery: spec.options.withHomebrewery === true,
                     wikiBase: 'http://wiki.example.test/index.php?title='
                 }
             );
