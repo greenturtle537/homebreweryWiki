@@ -13,7 +13,11 @@
  *
  * `--css` defaults to the default theme the extension serves.  `--base` is
  * the document root used for root-absolute URLs (`/fonts/...`), which the
- * vendored theme does not use but the build themes do.
+ * vendored theme does not use but the build themes do when they are compiled
+ * with an absolute `HBW_ASSET_BASE`.  `--base` falls back to the web server's
+ * `DOCUMENT_ROOT`, so that build mode verifies with no extra flag; without
+ * either, root-absolute URLs are reported as unresolvable rather than assumed
+ * present.
  *
  * @file
  */
@@ -35,7 +39,6 @@ var DEFAULT_CSS = [ path.join( repoRoot, 'vendor/homebrewery-3.21.0/theme/theme.
 function parseArgs( argv ) {
     var options = { css: [], base: null };
     var i;
-    var value;
 
     for ( i = 0; i < argv.length; i++ ) {
         if ( argv[ i ] === '--css' && i + 1 < argv.length ) {
@@ -49,6 +52,14 @@ function parseArgs( argv ) {
         } else {
             options.error = 'unknown argument: ' + argv[ i ];
         }
+    }
+
+    // A theme built with an absolute `HBW_ASSET_BASE` writes root-absolute
+    // URLs, which only the server's document root can resolve.  Take it from
+    // the environment so that build mode verifies without an extra flag; an
+    // explicit `--base` still wins.
+    if ( options.base === null && process.env.DOCUMENT_ROOT ) {
+        options.base = path.resolve( process.env.DOCUMENT_ROOT );
     }
 
     if ( !options.css.length ) {
@@ -217,6 +228,20 @@ function checkStylesheet( cssFile, base ) {
 }
 
 /**
+ * Whether a path is an existing directory.
+ *
+ * @param {string} target absolute path
+ * @return {boolean} true when the path is a directory
+ */
+function isDirectory( target ) {
+    try {
+        return fs.statSync( target ).isDirectory();
+    } catch ( error ) {
+        return false;
+    }
+}
+
+/**
  * Entry point.
  *
  * @return {void}
@@ -234,12 +259,22 @@ function main() {
 
     if ( options.help ) {
         process.stdout.write(
-            'usage: node build/theme/verify-assets.js [--css <file>]... [--base <dir>]\n'
+            'usage: node build/theme/verify-assets.js [--css <file>]... [--base <dir>]\n' +
+            '  --base  document root for root-absolute url() targets\n' +
+            '          (default: $DOCUMENT_ROOT)\n'
         );
         return;
     }
     if ( options.error ) {
         process.stderr.write( options.error + '\n' );
+        process.exitCode = 2;
+        return;
+    }
+    if ( options.base !== null && !isDirectory( options.base ) ) {
+        process.stderr.write(
+            'theme assets: --base ' + options.base + ' is not a directory.\n' +
+            'Point it (or DOCUMENT_ROOT) at the web server document root that serves the theme.\n'
+        );
         process.exitCode = 2;
         return;
     }
@@ -269,7 +304,7 @@ function main() {
     if ( unresolved.length ) {
         process.stderr.write(
             'theme assets: ' + unresolved.length + ' root-absolute url() target(s) need ' +
-            '--base <document root>:\n  ' + unresolved.join( '\n  ' ) + '\n'
+            '--base <document root> (or DOCUMENT_ROOT):\n  ' + unresolved.join( '\n  ' ) + '\n'
         );
     }
 
