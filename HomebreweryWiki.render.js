@@ -498,6 +498,13 @@
      * opening length; unclosed fences run to the end of the page, and an
      * unmatched backtick leaves the rest of its line as prose.
      *
+     * Indented code blocks (E4B4) are reported as code too.  A four-column
+     * lead opens one only where the renderers themselves treat the lines as
+     * code: at the start of the page, or after a blank line, and never as a
+     * continuation of a list item.  That keeps extraction in step with the
+     * pinned renderer and `marked`, which both emit `<pre><code>` for that
+     * shape — the extension must not invent a wider rule than they use.
+     *
      * @param {string} pageSource page source
      * @return {Object} walker with a `next()` method
      */
@@ -506,6 +513,23 @@
         var index = 0;
         var fenceChar = null;
         var fenceLength = 0;
+        var indentedCode = false;
+        // True before the first line: a page that starts with an indented
+        // block is code, exactly as both renderers treat it.
+        var previousBlank = true;
+        var lastNonBlank = '';
+        // A list item's content continues at its own indent, so an indented
+        // line under one is prose, not a code block (CommonMark).
+        var LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+
+        function isBlank( line ) {
+            return /^[ \t]*$/.test( line );
+        }
+
+        function hasCodeIndent( line ) {
+            // A leading tab advances to the next four-column stop.
+            return line.charAt( 0 ) === '\t' || /^ {4,}/.test( line );
+        }
 
         function isFenceClose( line ) {
             return new RegExp(
@@ -526,22 +550,56 @@
         return {
             next: function () {
                 var line;
+                var text;
                 if ( index >= lines.length ) {
                     return null;
                 }
                 line = lines[ index ];
                 index++;
+                text = line + ( index < lines.length ? '\n' : '' );
+
                 if ( fenceChar !== null ) {
                     if ( isFenceClose( line ) ) {
                         fenceChar = null;
                         fenceLength = 0;
                     }
-                    return { prose: false, text: line + ( index < lines.length ? '\n' : '' ) };
+                    return { prose: false, text: text };
                 }
                 if ( isFenceOpen( line ) ) {
-                    return { prose: false, text: line + ( index < lines.length ? '\n' : '' ) };
+                    indentedCode = false;
+                    return { prose: false, text: text };
                 }
-                return { prose: true, text: line + ( index < lines.length ? '\n' : '' ) };
+
+                // Inside an indented block: blanks and further indented lines
+                // belong to it.  The first unindented, non-blank line ends it
+                // and is classified normally below.
+                if ( indentedCode ) {
+                    if ( isBlank( line ) ) {
+                        previousBlank = true;
+                        return { prose: false, text: text };
+                    }
+                    if ( hasCodeIndent( line ) ) {
+                        return { prose: false, text: text };
+                    }
+                    indentedCode = false;
+                }
+
+                if ( hasCodeIndent( line ) && previousBlank &&
+                        !LIST_ITEM.test( lastNonBlank ) ) {
+                    indentedCode = true;
+                    previousBlank = false;
+                    lastNonBlank = line;
+                    return { prose: false, text: text };
+                }
+
+                if ( isBlank( line ) ) {
+                    previousBlank = true;
+                    return { prose: true, text: text };
+                }
+
+                previousBlank = false;
+                lastNonBlank = line;
+                return { prose: true, text: text };
             }
         };
     }
@@ -900,8 +958,8 @@
                     line = step.text.replace( /\n$/, '' );
 
                     if ( fenceChar === null ) {
-                        // The walker only marks a line as code when it opens
-                        // a fence, so this is an opening fence line.
+                        // A non-prose line here either opens a fence or belongs
+                        // to an indented code block (E4B4).
                         openMatch = /^ {0,3}(`{3,}|~{3,})/.exec( line );
                         if ( openMatch ) {
                             fenceChar = openMatch[ 1 ].charAt( 0 );
@@ -918,6 +976,10 @@
                             current = null;
                             noteFence = false;
                         }
+                        // An indented code block is a block: it ends any open
+                        // definition and stays in the page content (E4B4).
+                        current = null;
+                        noteFence = false;
                         kept.push( step.text );
                         continue;
                     }
