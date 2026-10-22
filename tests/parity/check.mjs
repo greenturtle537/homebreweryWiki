@@ -26,7 +26,12 @@ const fixtures = [
     // keeps the demo brew's style tab (`.page { padding-bottom: 1.1cm }`), which
     // changes the column height and therefore every line break on a full page.
     // This golden is a regression baseline recorded from this renderer instead.
-    { name: 'rich-brew', marker: 'After the Break', overflow: true, upstream: false }
+    {
+        name: 'rich-brew', marker: 'After the Break', overflow: true,
+        // Page 1 is the page that overruns; naming it keeps the check from
+        // accepting a flag on any other page.
+        overflowPages: [ 1 ], upstream: false
+    }
 ];
 const acceptGoldens = process.env.HBW_PARITY_ACCEPT === '1';
 
@@ -419,12 +424,13 @@ async function runFixture( browser, spec ) {
                 spec.name + ': at least one page is flagged as overflowing (' +
                 JSON.stringify( info.overflow.flags ) + ')' );
             // A regression that shifted the flag onto the wrong page would
-            // still satisfy the checks below, because they follow the flag.
-            pass( ( spec.overflowPages || [] ).every( ( index ) =>
-                Number( info.overflow.flags[ index - 1 ] ) >= 2 ),
-                spec.name + ': the pages that overrun are the flagged ones ' +
+            // still satisfy the checks below, because they follow the flag, so
+            // the flagged set has to equal the expected one: no page missing,
+            // no page added.
+            pass( flagged.join( ',' ) === ( spec.overflowPages || [] ).join( ',' ),
+                spec.name + ': flagged pages match the pages that overrun, want ' +
                 JSON.stringify( spec.overflowPages || [] ) + ' (got ' +
-                JSON.stringify( info.overflow.flags ) + ')' );
+                JSON.stringify( flagged ) + ')' );
             pass( info.overflow.host === flagged.join( ',' ),
                 spec.name + ': host carries the overflowing page numbers (got ' +
                 JSON.stringify( info.overflow.host ) + ', want ' +
