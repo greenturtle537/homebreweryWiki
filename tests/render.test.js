@@ -2062,5 +2062,22 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     }
 }() );
 
+// --- E4B3: inline links use the app's anchor colour, not the UA blue ---
+( function () {
+    var shellSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.shell.html' ), 'utf8'
+    );
+    var rule = /\.brewRenderer \.page a[^{]*\{[^}]*color:\s*var\(--HB_Color_HeaderText\)/.exec(
+        shellSource
+    );
+    ok( !!rule, 'link colour: brew anchors declare the theme header colour' );
+    ok( /a:where\(:not\([^)]*\.toc a[^)]*\.artist a/.test( shellSource ),
+        'link colour: component anchors keep their inherited colour' );
+    // The red-link rule must stay more specific than the plain anchor rule,
+    // or a missing wiki target would lose its red colour (E4S1T3).
+    ok( shellSource.indexOf( '.brewRenderer .page a.new' ) !== -1,
+        'link colour: the red-link rule is still declared' );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );
