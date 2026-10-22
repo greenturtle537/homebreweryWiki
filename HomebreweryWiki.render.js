@@ -498,6 +498,16 @@
      * opening length; unclosed fences run to the end of the page, and an
      * unmatched backtick leaves the rest of its line as prose.
      *
+     * Indented code blocks (E4B4) are reported as code too.  A four-column
+     * lead opens one only where the renderers themselves treat the lines as
+     * code: at the start of the page, after a blank line, a heading, a rule
+     * or a closing fence, and four columns past a list item's content indent
+     * rather than a continuation of its paragraph.  Tabs advance to the next
+     * four-column stop, so `   \t` reaches column four.  That keeps
+     * extraction in step with the pinned renderer and `marked`, which both
+     * emit `<pre><code>` for those shapes — the extension must not invent a
+     * wider rule than they use.
+     *
      * @param {string} pageSource page source
      * @return {Object} walker with a `next()` method
      */
@@ -506,6 +516,64 @@
         var index = 0;
         var fenceChar = null;
         var fenceLength = 0;
+        var indentedCode = false;
+        var indentedRequired = 4;
+        // True at the start of the page and after a blank line, heading, rule
+        // or closing fence: a position where an indented line opens a block.
+        // A paragraph line clears it, because the next indented line is then
+        // its lazy continuation rather than code.
+        var blockBoundary = true;
+        // Content indent of the enclosing list item, or null at top level.
+        // Four columns past this is a code block inside the item; less is a
+        // continuation of the item's paragraph.
+        var listIndent = null;
+        var LIST_ITEM = /^( {0,3})((?:[-*+]|\d{1,9}[.)]))([ \t]+|$)/;
+        var ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+        var RULE_OR_SETEXT = /^ {0,3}(?:=+|-{3,})[ \t]*$/;
+
+        function isBlank( line ) {
+            return /^[ \t]*$/.test( line );
+        }
+
+        // Leading whitespace in columns: a tab advances to the next
+        // four-column stop, so `   \t` reaches column four (E4B4 review).
+        function indentColumns( line ) {
+            var columns = 0;
+            var i = 0;
+            var ch;
+            for ( ; i < line.length; i++ ) {
+                ch = line.charAt( i );
+                if ( ch === ' ' ) {
+                    columns++;
+                } else if ( ch === '\t' ) {
+                    columns += 4 - ( columns % 4 );
+                } else {
+                    break;
+                }
+            }
+            return columns;
+        }
+
+        // Where a list item's content starts (marker plus 1-4 spaces, or one
+        // column when the marker has no following space).
+        function listContentIndent( line ) {
+            var match = LIST_ITEM.exec( line );
+            var spaces;
+            var column;
+
+            if ( !match ) {
+                return null;
+            }
+            column = match[ 1 ].length + match[ 2 ].length;
+            spaces = match[ 3 ] || '';
+            if ( spaces.charAt( 0 ) === '\t' ) {
+                return column + ( 4 - ( column % 4 ) );
+            }
+            if ( !spaces || spaces.length > 4 ) {
+                return column + 1;
+            }
+            return column + spaces.length;
+        }
 
         function isFenceClose( line ) {
             return new RegExp(
@@ -526,22 +594,76 @@
         return {
             next: function () {
                 var line;
+                var text;
+                var itemIndent;
                 if ( index >= lines.length ) {
                     return null;
                 }
                 line = lines[ index ];
                 index++;
+                text = line + ( index < lines.length ? '\n' : '' );
+
                 if ( fenceChar !== null ) {
                     if ( isFenceClose( line ) ) {
                         fenceChar = null;
                         fenceLength = 0;
+                        blockBoundary = true;
                     }
-                    return { prose: false, text: line + ( index < lines.length ? '\n' : '' ) };
+                    return { prose: false, text: text };
                 }
                 if ( isFenceOpen( line ) ) {
-                    return { prose: false, text: line + ( index < lines.length ? '\n' : '' ) };
+                    indentedCode = false;
+                    blockBoundary = false;
+                    listIndent = null;
+                    return { prose: false, text: text };
                 }
-                return { prose: true, text: line + ( index < lines.length ? '\n' : '' ) };
+
+                // Inside an indented block: blanks and further indented lines
+                // belong to it.  The first shallower, non-blank line ends it
+                // and is classified normally below.
+                if ( indentedCode ) {
+                    if ( isBlank( line ) ) {
+                        blockBoundary = true;
+                        return { prose: false, text: text };
+                    }
+                    if ( indentColumns( line ) >= indentedRequired ) {
+                        return { prose: false, text: text };
+                    }
+                    indentedCode = false;
+                }
+
+                // An indented block opens only where the renderers open one:
+                // four columns at the top level, or four past the enclosing
+                // list item's content, and never as a lazy paragraph
+                // continuation (E4B4 review).
+                if ( blockBoundary && !isBlank( line ) ) {
+                    indentedRequired = listIndent === null ? 4 : listIndent + 4;
+                    if ( indentColumns( line ) >= indentedRequired ) {
+                        indentedCode = true;
+                        blockBoundary = false;
+                        return { prose: false, text: text };
+                    }
+                }
+
+                if ( isBlank( line ) ) {
+                    blockBoundary = true;
+                    return { prose: true, text: text };
+                }
+
+                // A line indented at or past the item's content indent
+                // continues that item, so it stays open and the code
+                // threshold stays relative to it; anything shallower ends
+                // the item and returns to the top-level threshold.
+                itemIndent = listContentIndent( line );
+                if ( itemIndent !== null ) {
+                    listIndent = itemIndent;
+                } else if ( listIndent === null ||
+                        indentColumns( line ) < listIndent ) {
+                    listIndent = null;
+                }
+                blockBoundary = ATX_HEADING.test( line ) ||
+                    RULE_OR_SETEXT.test( line );
+                return { prose: true, text: text };
             }
         };
     }
@@ -900,8 +1022,8 @@
                     line = step.text.replace( /\n$/, '' );
 
                     if ( fenceChar === null ) {
-                        // The walker only marks a line as code when it opens
-                        // a fence, so this is an opening fence line.
+                        // A non-prose line here either opens a fence or belongs
+                        // to an indented code block (E4B4).
                         openMatch = /^ {0,3}(`{3,}|~{3,})/.exec( line );
                         if ( openMatch ) {
                             fenceChar = openMatch[ 1 ].charAt( 0 );
@@ -918,6 +1040,10 @@
                             current = null;
                             noteFence = false;
                         }
+                        // An indented code block is a block: it ends any open
+                        // definition and stays in the page content (E4B4).
+                        current = null;
+                        noteFence = false;
                         kept.push( step.text );
                         continue;
                     }

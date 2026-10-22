@@ -1326,7 +1326,10 @@ function offOriginFetches( win, root ) {
         'destroyed marker: first link keeps its label' );
     ok( refs.length === 2 && refs[ 1 ].getAttribute( 'href' ) === '#hbw-fn-1-three',
         'destroyed marker: later link keeps its label, not the shifted one' );
-    ok( notes.length === 3, 'destroyed marker: all three notes are still listed' );
+    // E4B4: the indented line is a code block, so its reference is not a
+    // prose reference and the note is unused.  Unused definitions are never
+    // emitted, so the page lists the two referenced notes only.
+    ok( notes.length === 2, 'destroyed marker: only referenced notes are listed' );
     ok( page.errors.length === 0, 'destroyed marker: no console errors' );
 }() );
 
@@ -1920,6 +1923,143 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'security: external image sources are stripped in the iframe' );
     ok( page.errors.length === 0,
         'security: hostile brew raises no console errors' );
+}() );
+
+// --- E4B4: definition-shaped lines inside indented code stay code ---
+( function () {
+    // Both renderers emit `<pre><code>` for a blank-line-separated
+    // four-space block, so extraction must agree with them, not widen the
+    // rule.  Each case runs on the pinned renderer and on marked.
+    var paths = [
+        { name: 'pinned', options: { withHomebrewery: true } },
+        { name: 'marked', options: {} }
+    ];
+    var i;
+    for ( i = 0; i < paths.length; i++ ) {
+        ( function ( spec ) {
+            var page = makePage(
+                'Code sample:\n\n    [^a]: looks like a def but is code\n',
+                spec.options
+            );
+            var doc = frameDocOf( page );
+            var code = doc ? doc.querySelector( '.page pre code' ) : null;
+            var notes = doc ? doc.querySelector( '.hbw-footnotes' ) : null;
+            ok( !!code && code.textContent.indexOf( '[^a]: looks like' ) !== -1,
+                'E4B4 ' + spec.name + ': the indented line renders as code' );
+            ok( !notes || notes.textContent.indexOf( 'looks like a def' ) === -1,
+                'E4B4 ' + spec.name + ': no note is taken from the code block' );
+            ok( page.errors.length === 0,
+                'E4B4 ' + spec.name + ': no console errors' );
+
+            // A real definition is unaffected.
+            var prose = makePage(
+                'Cite [^b].\n\n[^b]: real note\n', spec.options
+            );
+            var proseDoc = frameDocOf( prose );
+            var proseNotes = proseDoc ? proseDoc.querySelector( '.hbw-footnotes' ) : null;
+            var ref = proseDoc ? proseDoc.querySelector( '.hbw-footnote-ref' ) : null;
+            ok( !!ref, 'E4B4 ' + spec.name + ': a real citation still links' );
+            ok( !!proseNotes && proseNotes.textContent.indexOf( 'real note' ) !== -1,
+                'E4B4 ' + spec.name + ': a column-0 definition still works' );
+
+            // Overstep guard: an indented line that continues a list item is
+            // prose in both renderers, so the walker must not call it code.
+            var list = makePage(
+                'Text.\n\n- item\n\n    continuation line\n', spec.options
+            );
+            var listDoc = frameDocOf( list );
+            ok( !listDoc || !listDoc.querySelector( '.page pre' ),
+                'E4B4 ' + spec.name + ': list continuation is not code' );
+
+            // A heading ends its block, so an indented line straight after one
+            // is code with no blank line in between.
+            var heading = makePage(
+                '# Head\n    [^h]: inside code\n', spec.options
+            );
+            var headingDoc = frameDocOf( heading );
+            var headingCode = headingDoc ? headingDoc.querySelector( '.page pre code' ) : null;
+            ok( !!headingCode && headingCode.textContent.indexOf( '[^h]: inside code' ) !== -1,
+                'E4B4 ' + spec.name + ': code after a heading renders as code' );
+            ok( !headingDoc || !headingDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': code after a heading makes no note' );
+
+            // Four columns past a list item's content indent is a code block
+            // inside the item; four columns flat is just a continuation.
+            var nested = makePage(
+                '- item\n\n      [^n]: inside code\n', spec.options
+            );
+            var nestedDoc = frameDocOf( nested );
+            var nestedCode = nestedDoc ? nestedDoc.querySelector( '.page pre code' ) : null;
+            ok( !!nestedCode && nestedCode.textContent.indexOf( '[^n]: inside code' ) !== -1,
+                'E4B4 ' + spec.name + ': code inside a list item renders as code' );
+            ok( !nestedDoc || !nestedDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': code inside a list item makes no note' );
+
+            // A tab reaches column four after up to three spaces.
+            var tabbed = makePage(
+                'Code:\n\n   \t[^t]: inside code\n', spec.options
+            );
+            var tabbedDoc = frameDocOf( tabbed );
+            var tabbedCode = tabbedDoc ? tabbedDoc.querySelector( '.page pre code' ) : null;
+            ok( !!tabbedCode && tabbedCode.textContent.indexOf( '[^t]: inside code' ) !== -1,
+                'E4B4 ' + spec.name + ': space-then-tab indent is code' );
+            ok( !tabbedDoc || !tabbedDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': space-then-tab code makes no note' );
+
+            // A paragraph continuation keeps the list item open, so a
+            // four-space line after it is still item prose, not top-level
+            // code: tokens rewrite and definitions extract there.
+            var cont = makePage(
+                '- item\n\n    continuation\n\n    [[Page Two]]\n',
+                {
+                    withHomebrewery: spec.options.withHomebrewery === true,
+                    wikiBase: 'http://wiki.example.test/index.php?title='
+                }
+            );
+            var contDoc = frameDocOf( cont );
+            ok( !!contDoc && !contDoc.querySelector( '.page pre' ),
+                'E4B4 ' + spec.name + ': post-continuation indent stays prose' );
+            ok( !!contDoc && !!contDoc.querySelector( 'a[href$="Page_Two"]' ),
+                'E4B4 ' + spec.name + ': token in a list continuation still links' );
+
+            var contNote = makePage(
+                '- item\n\n    continuation\n\n    [^f]: note body\n\nCite [^f].\n',
+                spec.options
+            );
+            var contNoteDoc = frameDocOf( contNote );
+            var contNotes = contNoteDoc ? contNoteDoc.querySelector( '.hbw-footnotes' ) : null;
+            ok( !!contNotes && contNotes.textContent.indexOf( 'note body' ) !== -1,
+                'E4B4 ' + spec.name + ': definition in a list continuation still extracts' );
+
+            // Six columns past the item (content indent 2 + 4) is code.
+            var contCode = makePage(
+                '- item\n\n    continuation\n\n      [^c]: inside code\n',
+                spec.options
+            );
+            var contCodeDoc = frameDocOf( contCode );
+            var contCodeEl = contCodeDoc ? contCodeDoc.querySelector( '.page pre code' ) : null;
+            ok( !!contCodeEl && contCodeEl.textContent.indexOf( '[^c]:' ) !== -1,
+                'E4B4 ' + spec.name + ': six columns past the item is code' );
+            ok( !contCodeDoc || !contCodeDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': post-continuation code makes no note' );
+
+            // Wiki tokens inside an indented block are code: they stay
+            // literal, exactly like tokens inside a fence.
+            var token = makePage(
+                'Wiki sample:\n\n    [[Page Two]] and [[File:Name.png]]\n',
+                {
+                    withHomebrewery: spec.options.withHomebrewery === true,
+                    wikiBase: 'http://wiki.example.test/index.php?title='
+                }
+            );
+            var tokenDoc = frameDocOf( token );
+            var tokenCode = tokenDoc ? tokenDoc.querySelector( '.page pre code' ) : null;
+            ok( !!tokenCode && tokenCode.textContent.indexOf( '[[Page Two]]' ) !== -1,
+                'E4B4 ' + spec.name + ': wiki tokens inside indented code stay literal' );
+            ok( !tokenDoc || !tokenDoc.querySelector( '.page a' ),
+                'E4B4 ' + spec.name + ': indented code creates no wiki links' );
+        }( paths[ i ] ) );
+    }
 }() );
 
 // --- E4B3: inline links use the app's anchor colour, not the UA blue ---
