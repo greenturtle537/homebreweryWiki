@@ -1523,6 +1523,138 @@ function offOriginFetches( win, root ) {
     ok( page.errors.length === 0, 'red links: no console errors' );
 }() );
 
+// --- E4B5: a wiki-link fragment stays an anchor, not part of the title ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Links\n\n'
+        + 'See [[Page#Section|label]], [[Page#Section]], [[#Local]] and '
+        + '[[Missing#Part|gone]].\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base,
+        links: { 'Page': true, 'Missing': false }
+    } );
+    var rendered = renderRoot( page );
+    var local = rendered ? rendered.querySelector( 'a[href="#Local"]' ) : null;
+    var missing = rendered ? rendered.querySelector(
+        'a[href="' + base + 'Missing#Part"]'
+    ) : null;
+
+    ok( !!rendered && !!rendered.querySelector( 'a[href="' + base + 'Page#Section"]' ),
+        'wiki fragment: the page anchor stays outside the title parameter' );
+    ok( !!rendered && !rendered.querySelector( 'a[href*="%23"]' ),
+        'wiki fragment: the # is never percent-encoded into the title' );
+    ok( !!local, 'wiki fragment: a bare #anchor is a same-page link' );
+    ok( !!local && local.getAttribute( 'target' ) === '_self',
+        'wiki fragment: a bare #anchor stays inside the iframe' );
+    ok( !!missing && ( ' ' + missing.className + ' ' ).indexOf( ' new ' ) !== -1,
+        'wiki fragment: a missing page is still a red link' );
+    ok( page.errors.length === 0, 'wiki fragment: no console errors' );
+}() );
+
+// --- E4B5: a spaced page title trims before the existence lookup ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var page = makePage( '# T\n\nSee [[Missing #Part|space]].\n', {
+        withHomebrewery: true,
+        wikiBase: base,
+        links: { 'Missing': false }
+    } );
+    var rendered = renderRoot( page );
+    var anchor = rendered ? rendered.querySelector(
+        'a[href="' + base + 'Missing#Part"]'
+    ) : null;
+
+    ok( !!anchor && ( ' ' + anchor.className + ' ' ).indexOf( ' new ' ) !== -1,
+        'wiki fragment: a spaced title still styles its missing page red' );
+    ok( page.errors.length === 0, 'wiki fragment: no console errors (trim)' );
+}() );
+
+// --- E4B5 review: a bare [[#Heading]] resolves to the ACTIVE renderer's id.
+// The two vendored renderers slug headings differently: the pinned bundle
+// keeps non-ASCII and emits `caffè--cream`; the marked fallback folds to
+// ASCII and emits `caff-cream-`.  Both paths must land their own id.
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Chapter One\n\n## Caffè & Cream!\n\n'
+        + 'see [[#Chapter One|up]] and [[#Caffè & Cream!]]\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base
+    } );
+    var rendered = renderRoot( page );
+
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' )
+            .indexOf( 'homebrewery-' ) === 0,
+        'heading anchors: pinned renderer in use' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#chapter-one"]' ),
+        'heading anchors (pinned): #Chapter One resolves to the emitted id' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#caffè--cream"]' ),
+        'heading anchors (pinned): #Caffè & Cream! resolves to its unicode id' );
+    ok( !!rendered && !rendered.querySelector( 'a[href="#Caffè_&_Cream!"]' ),
+        'heading anchors (pinned): the raw fragment is rewritten' );
+    ok( !!rendered && !!rendered.querySelector( 'h2#caffè--cream' ),
+        'heading anchors (pinned): the link points at a real heading' );
+    ok( page.errors.length === 0, 'heading anchors (pinned): no console errors' );
+}() );
+
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Chapter One\n\n## Caffè & Cream!\n\n'
+        + 'see [[#Chapter One|up]] and [[#Caffè & Cream!]]\n';
+    var page = makePage( source, { wikiBase: base } ); // no pinned bundle: marked fallback
+    var rendered = renderRoot( page );
+
+    ok( !!rendered && hostOf( page ).getAttribute( 'data-hbw-renderer' ) === 'marked-0.3.19',
+        'heading anchors: marked fallback in use' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#chapter-one"]' ),
+        'heading anchors (marked): #Chapter One resolves to the emitted id' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#caff-cream-"]' ) &&
+        !rendered.querySelector( 'a[href="#caffè--cream"]' ),
+        'heading anchors (marked): #Caffè & Cream! resolves to its ASCII id' );
+    ok( !!rendered && !!rendered.querySelector( 'h2#caff-cream-' ),
+        'heading anchors (marked): the link points at a real heading' );
+    ok( page.errors.length === 0, 'heading anchors (marked): no console errors' );
+}() );
+
+// --- E4B5 review: fragments that collide with Object.prototype stay dead,
+// and an exact emitted id beats a normalized key.
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '# Chapter One\n\n'
+        + 'see [[#constructor]], [[#__proto__]] and [[#toString]]\n';
+    var page = makePage( source, { withHomebrewery: true, wikiBase: base } );
+    var rendered = renderRoot( page );
+    var proto = rendered ? rendered.querySelector( 'a[href="#__proto__"]' ) : null;
+
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#constructor"]' ),
+        'anchor safety: #constructor is left unresolved, not the Object constructor' );
+    ok( !!proto, 'anchor safety: #__proto__ is left unresolved' );
+    ok( !!rendered && !/[a-z]+ Object\(\)|native code/.test(
+        rendered.innerHTML
+    ), 'anchor safety: no inherited property leaked into an href' );
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#toString"]' ),
+        'anchor safety: an inherited name keeps its literal fragment' );
+    ok( !!rendered && !rendered.querySelector( 'a[href="#tostring"]' ),
+        'anchor safety: an inherited name is not slugged into a heading' );
+    ok( page.errors.length === 0, 'anchor safety: no console errors' );
+}() );
+
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var source = '<h2 id="target-section">First</h2>\n\n'
+        + '<h2 id="target_section">Second</h2>\n\n'
+        + 'go [[#target_section]]\n';
+    var page = makePage( source, { wikiBase: base } ); // marked fallback
+    var rendered = renderRoot( page );
+
+    ok( !!rendered && !!rendered.querySelector( 'a[href="#target_section"]' ),
+        'anchor exactness: an exact emitted id wins over the normalized key' );
+    ok( !!rendered && !rendered.querySelector( 'a[href="#target-section"]' ),
+        'anchor exactness: the colliding heading is not chosen' );
+    ok( page.errors.length === 0, 'anchor exactness: no console errors' );
+}() );
+
 // --- E3.5S3 T1: wiki tokens inside inline code stay literal ---
 ( function () {
     var base = 'http://wiki.example.test/index.php?title=';
