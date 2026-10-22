@@ -47,6 +47,16 @@ body {
 .hbw-footnote-back {
     text-decoration: none;
 }
+/* Inline link colour (E4B3): the real app supplies the anchor colour from
+ * its own application stylesheet, which the shell does not otherwise
+ * replicate, so plain markdown links fell back to the user-agent blue.
+ * Use the theme's own header-colour token so the two cannot drift, and
+ * exclude the theme components that deliberately inherit their colour
+ * (`.toc`, `.artist`, `.homebreweryCredits`): `:where()` keeps their
+ * two-class rules winning. */
+.brewRenderer .page a:where(:not(.toc a, .artist a, .homebreweryCredits a)) {
+    color: var(--HB_Color_HeaderText);
+}
 /* Red link (E4S1T3): the parent reports a missing target, and the reader
  * gets the wiki convention rather than a link that looks valid. */
 a.new,
