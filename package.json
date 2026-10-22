@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node tests/render.test.js",
     "test:mw": "sh tests/mw/run.sh",
+    "verify:assets": "node build/theme/verify-assets.js",
     "visual": "node tests/visual/render-baseline.js",
     "visual:update": "node tests/visual/render-baseline.js --update",
     "parity": "node tests/parity/check.mjs",

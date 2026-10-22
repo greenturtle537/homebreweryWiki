@@ -100,7 +100,17 @@ host instead:
 
 ```sh
 sh build/theme/fetch-assets.sh   # downloads the pinned tag, verifies hashes
+npm run verify:assets            # fails if any served url() target is missing
 ```
+
+`fetch-assets.sh` is a required step in **every** build and deploy, not an
+optional extra: the committed stylesheet points at fonts and textures that
+only that script installs, and a wiki that skips it serves a theme whose icons
+and textures 404 without any server error. Run `npm run verify:assets` after
+installing to confirm the served stylesheet resolves; it accepts a
+`@font-face` `src` list when any entry in the list is present (the pinned set
+ships the `.woff2` files, not the `.ttf` fallbacks), and it exits non-zero
+when a plain `url()` points at nothing. CI runs it in both browser jobs.
 
 The build itself (`sh build/theme/build.sh`) fetches `naturalcrit/homebrewery`
 v3.21.0, compiles `themes/V3/Blank/style.less` then
