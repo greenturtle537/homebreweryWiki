@@ -2079,5 +2079,145 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'link colour: the red-link rule is still declared' );
 }() );
 
+// --- E4B1: column overflow is reported without changing the layout ---
+( function () {
+    var page = makePage( '# Fits\n\nA short brew that needs one column.\n' );
+    var host = hostOf( page );
+    var doc = page.win.document;
+    var rendered = renderRoot( page );
+
+    // jsdom has no layout, so scrollWidth is 0 and nothing may be flagged; the
+    // notice must never be invented. The positive case is asserted in the
+    // parity suite, which renders a fixture that overruns in Chromium.
+    ok( !!host && host.getAttribute( 'data-hbw-overflow' ) === null,
+        'E4B1: no overflow attribute when layout is unavailable' );
+    ok( !doc.querySelector( '.hbw-overflow-notice' ),
+        'E4B1: no overflow notice when layout is unavailable' );
+    ok( !!rendered && !rendered.querySelector( '[data-hbw-overflow]' ),
+        'E4B1: no page is flagged without layout' );
+
+    var themeSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    );
+    ok( /\.hbw-brew \.hbw-overflow-notice\s*\{/.test( themeSource ),
+        'E4B1: the overflow notice is styled on the host' );
+    ok( /@media print[\s\S]*\.hbw-brew \.hbw-overflow-notice\s*\{\s*display:\s*none/.test( themeSource ),
+        'E4B1: the overflow notice is dropped from print' );
+
+    var shellSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.shell.html' ), 'utf8'
+    );
+    ok( /\.brewRenderer \.page > \.columnWrapper > :first-child\s*\{\s*margin-top:\s*0/.test( shellSource ),
+        'E4B1: the page base reset keeps the first block flush' );
+    ok( /\.brewRenderer \*\s*\{\s*box-sizing:\s*border-box/.test( shellSource ),
+        'E4B1: the page base reset matches the app box model' );
+}() );
+
+// --- E4B6: a leading css fence is page style, not rendered text ---
+( function () {
+    var source = '```css\n' +
+        '.page { padding-bottom : 1.1cm; }\n' +
+        '.note { border-color : rgb( 0, 128, 0 ); }\n' +
+        '```\n\n' +
+        '# Styled Brew\n\nA paragraph after the fence.\n';
+    var page = makePage( source );
+    var host = hostOf( page );
+    var doc = frameDocOf( page );
+    var rendered = renderRoot( page );
+    var style = doc ? doc.querySelector( 'style.hbw-page-style' ) : null;
+
+    ok( !!host && host.getAttribute( 'data-hbw-style' ) === 'applied',
+        'E4B6: a leading css fence is reported as applied' );
+    ok( !!style, 'E4B6: the stylesheet lands in the frame document' );
+    ok( !!style && style.textContent.indexOf( '.page { padding-bottom' ) !== -1,
+        'E4B6: the fence body is applied verbatim' );
+    ok( !!style && style.textContent.indexOf( 'border-color' ) !== -1,
+        'E4B6: later rules in the fence survive' );
+    ok( !!doc && doc.head.contains( style ),
+        'E4B6: the stylesheet is in the frame head' );
+    ok( !page.win.document.querySelector( 'style.hbw-page-style' ),
+        'E4B6: the stylesheet does not reach the wiki document' );
+    ok( !!rendered && !rendered.querySelector( 'pre' ),
+        'E4B6: the fence is not rendered as a code block' );
+    ok( !!rendered && !!rendered.querySelector( 'h1' ) &&
+        rendered.querySelector( 'h1' ).textContent === 'Styled Brew',
+        'E4B6: the brew body follows the fence unchanged' );
+}() );
+
+// --- E4B6: an escape is not a way around the refusal list ---
+( function () {
+    // A legitimate escape stays legitimate: refusing every backslash would
+    // throw out `content: "\\2014"` along with the tricks.
+    var page = makePage(
+        '```css\n.page::after { content : "\\2014"; }\n```\n\n# Title\n\nBody.\n'
+    );
+    var doc = frameDocOf( page );
+    ok( !!hostOf( page ) && hostOf( page ).getAttribute( 'data-hbw-style' ) === 'applied',
+        'E4B6: a harmless escape does not refuse the block' );
+    ok( !!doc && !!doc.querySelector( 'style.hbw-page-style' ) &&
+        doc.querySelector( 'style.hbw-page-style' ).textContent.indexOf( '\\2014' ) !== -1,
+        'E4B6: the escaped rule is applied as written' );
+}() );
+
+// --- E4B6: a fence is only lifted where markdown would treat it as one ---
+( function () {
+    var midBrew = makePage(
+        '# Title\n\n```css\n.page { color : red; }\n```\n'
+    );
+    var midDoc = frameDocOf( midBrew );
+    ok( !!hostOf( midBrew ) && hostOf( midBrew ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: a fence after the first block is not page style' );
+    ok( !!midDoc && !midDoc.querySelector( 'style.hbw-page-style' ),
+        'E4B6: a mid-brew fence injects nothing' );
+    ok( !!renderRoot( midBrew ) && !!renderRoot( midBrew ).querySelector( 'pre code' ),
+        'E4B6: a mid-brew fence stays a code block' );
+
+    var infoString = makePage( '```js\nalert( 1 );\n```\n\n# Title\n' );
+    ok( !!hostOf( infoString ) && hostOf( infoString ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: a leading fence with another language stays code' );
+    ok( !!renderRoot( infoString ) && !!renderRoot( infoString ).querySelector( 'pre code' ),
+        'E4B6: a leading js fence remains a code block' );
+
+    // A tab is four columns of indentation, so this opens an indented code
+    // block, not a fence: its body must not become the page stylesheet.
+    var tabbed = makePage( '\t```css\n.page { color : red; }\n```\n\n# Title\n' );
+    ok( !!hostOf( tabbed ) && hostOf( tabbed ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: a tab-indented fence is not page style' );
+    ok( !!frameDocOf( tabbed ) && !frameDocOf( tabbed ).querySelector( 'style.hbw-page-style' ),
+        'E4B6: a tab-indented fence injects nothing' );
+
+    var unclosed = makePage( '```css\n.page { color : red; }\n' );
+    ok( !!hostOf( unclosed ) && hostOf( unclosed ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: an unclosed fence is not applied' );
+}() );
+
+// --- E4B6: a stylesheet that would escape its terms is refused, not run ---
+( function () {
+    var cases = [
+        { name: '@import', css: '@import url( "//example.com/x.css" );\n.page { color : red; }' },
+        { name: 'legacy binding', css: '.page { behavior : url( #default#userdata ); }' },
+        { name: 'closing tag', css: '.page { color : red; } </style><script>1</script>' },
+        // A CSS parser reads `@\69mport` as `@import`; the guard must too.
+        { name: 'escaped @import', css: '@\\69mport url( "/theme.css" );\n.page { color : red; }' },
+        { name: 'escaped behavior', css: '.page { beh\\61vior : url( #x ); }' }
+    ];
+
+    cases.forEach( ( spec ) => {
+        var page = makePage(
+            '```css\n' + spec.css + '\n```\n\n# Title\n\nBody.\n'
+        );
+        var doc = frameDocOf( page );
+        var rendered = renderRoot( page );
+        ok( !!hostOf( page ) && hostOf( page ).getAttribute( 'data-hbw-style' ) === 'refused',
+            'E4B6 ' + spec.name + ': the block is reported as refused' );
+        ok( !!doc && !doc.querySelector( 'style.hbw-page-style' ),
+            'E4B6 ' + spec.name + ': nothing is injected' );
+        ok( !!rendered && !!rendered.querySelector( 'pre code' ),
+            'E4B6 ' + spec.name + ': the fence stays visible as code' );
+        ok( !!doc && !doc.querySelector( 'script' ),
+            'E4B6 ' + spec.name + ': no script reaches the frame' );
+    } );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );

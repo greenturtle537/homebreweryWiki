@@ -6,7 +6,17 @@ import { chromium } from 'playwright';
 
 const here = path.dirname( fileURLToPath( import.meta.url ) );
 const root = path.resolve( here, '..', '..' );
-const fixture = path.join( root, 'tests', 'fixtures', 'three-page-brew.md' );
+/**
+ * Fixtures whose upstream pages become goldens. Only fixtures the app can
+ * render faithfully belong here: `rich-brew` is recorded from this renderer,
+ * because the app's stored style tab changes a full page's column height (see
+ * tests/parity/README.md). Capturing it from the app would silently replace a
+ * correct golden with a wrong one; refresh it with
+ * `HBW_PARITY_ACCEPT=1 npm run parity` instead.
+ */
+const fixtures = [
+    { name: 'three-page-brew', marker: 'Page Three' }
+];
 const site = 'https://homebrewery.naturalcrit.com';
 const outIndex = process.argv.indexOf( '--out' );
 const out = outIndex !== -1 && process.argv[ outIndex + 1 ]
@@ -41,27 +51,29 @@ async function setSource( page, source ) {
     return 'CodeMirror 6 keyboard input';
 }
 
-async function main() {
-    const source = fs.readFileSync( fixture, 'utf8' );
+async function capture( browser, spec ) {
+    const source = fs.readFileSync(
+        path.join( root, 'tests', 'fixtures', spec.name + '.md' ), 'utf8'
+    );
     const pagesWanted = expectedPages( source );
-    const browser = await chromium.launch();
-    try {
+    {
         const page = await browser.newPage( { viewport: { width: 1400, height: 1200 } } );
         await page.goto( site, { waitUntil: 'domcontentloaded', timeout: 60000 } );
         await page.waitForTimeout( 3000 );
         const api = await setSource( page, source );
 
-        await page.waitForFunction( ( count ) => {
+        await page.waitForFunction( ( want ) => {
             const frame = document.querySelector( '#BrewRenderer' );
             const doc = frame && frame.contentDocument;
-            const pages = doc
-                ? Array.prototype.slice.call( doc.querySelectorAll( '.pages > .page' ) )
+            const pagesNode = doc && doc.querySelector( '.pages' );
+            const pages = pagesNode
+                ? Array.prototype.slice.call( pagesNode.querySelectorAll( ':scope > .page' ) )
                 : [];
-            return pages.length === count &&
+            return pages.length === want.count &&
                 pages.every( ( node ) => Math.abs( node.offsetWidth - 816 ) <= 1 &&
                     Math.abs( node.offsetHeight - 1056 ) <= 1 ) &&
-                doc.querySelector( '.pages' ).textContent.indexOf( 'Page Three' ) !== -1;
-        }, pagesWanted, { timeout: 30000 } );
+                pagesNode.textContent.indexOf( want.marker ) !== -1;
+        }, { count: pagesWanted, marker: spec.marker }, { timeout: 30000 } );
 
         await page.evaluate( async () => {
             const frame = document.querySelector( '#BrewRenderer' );
@@ -113,11 +125,21 @@ async function main() {
                 throw new Error( 'page ' + ( index + 1 ) + ' is not ' +
                     pageWidth + ' CSS px wide (' + ( box && box.width ) + ')' );
             }
-            const name = 'three-page-brew-' + ( index + 1 ) + '.png';
+            const name = spec.name + '-' + ( index + 1 ) + '.png';
             await node.screenshot( { path: path.join( out, name ) } );
             console.log( 'captured ' + path.join( out, name ) );
         }
-        console.log( 'source set via ' + api );
+        console.log( spec.name + ': source set via ' + api );
+        await page.close();
+    }
+}
+
+async function main() {
+    const browser = await chromium.launch();
+    try {
+        for ( const spec of fixtures ) {
+            await capture( browser, spec );
+        }
     } finally {
         await browser.close();
     }

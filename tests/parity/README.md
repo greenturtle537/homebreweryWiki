@@ -1,6 +1,6 @@
 # Parity and golden regression harness (E3.5S5)
 
-`npm run parity` loads `tests/fixtures/three-page-brew.md` through the real
+`npm run parity` loads every fixture in its `fixtures` list through the real
 production path: `HomebreweryWiki.shell.html`, `HomebreweryWiki.render.js`, and
 the compiled upstream theme pinned at **Homebrewery v3.21.0**. The repository is
 served over Playwright routes on `http://hbw.test`, so the iframe, theme,
@@ -16,7 +16,52 @@ The check asserts:
   `allow-same-origin allow-top-navigation-by-user-activation` (never
   `allow-scripts`) and `referrerpolicy="no-referrer"`;
 - every same-origin asset request succeeds, with zero outbound requests;
-- each 816 CSS px page matches `goldens/three-page-brew-<n>.png`.
+- the column-overflow signal (E4B1) is present exactly when the fixture
+  overruns: `data-hbw-overflow="<pages>"` on the host and `.pages`, the column
+  count on each overfull `.page`, and a notice in the host above the frame that
+  names the clipped pages — and absent for a fixture that fits;
+- each 816 CSS px page matches `goldens/<fixture>-<n>.png`.
+
+Fixtures and golden provenance:
+
+| Fixture | Covers | Goldens from |
+|---|---|---|
+| `three-page-brew.md` | page split, `\column`, numbering | the Homebrewery app |
+| `rich-brew.md` | clipping, note box, table, list, quote, both markers | this renderer |
+| `styled-brew.md` | leading ` ```css ` style fence applied as page style | this renderer |
+
+`rich-brew.md` exists because the older fixture — three pages of one heading
+and one sentence — cannot clip, so nothing measured the failure in E4B1. Its
+golden is recorded from this renderer rather than the app: the app's editor
+keeps the demo brew's style tab (`.page { padding-bottom: 1.1cm }`), which
+changes the column height and therefore every line break on a full page. An
+app capture of a full page is not a stable target; the structural assertions
+above are what pin the behaviour, and the golden pins this renderer's output.
+Record or refresh it with:
+
+```sh
+HBW_PARITY_ACCEPT=1 npm run parity
+```
+
+That writes only fixtures marked `upstream: false` and must be reviewed like
+any other golden change.
+
+## Page style from a leading fence (E4B6)
+
+A brew may open with a fenced ` ```css ` block. Upstream keeps a
+brew's stylesheet apart from its markdown and the demo ships it as that fence,
+so the renderer lifts it out before rendering and writes it into the frame
+document as `<style class="hbw-page-style">`, after the theme link. It never
+reaches the wiki page: the frame is script-free and the CSP bounds what CSS may
+load, so the sheet cannot escape its page.
+
+The fence is only lifted where markdown would treat it as one — first thing in
+the brew, info string `css`, closed. Anything else stays a code block. A block
+carrying `@import`, `expression(`, `behavior:`, `-moz-binding` or a `</style`
+sequence is refused outright: the fence stays visible as code and the host
+reports `data-hbw-style="refused"`. `styled-brew.md` pins the happy path,
+including the page's computed `padding-bottom` (41.57px, from the fence, not the
+theme's 64.25px).
 
 Pixel comparison uses pixelmatch threshold `0.1` and fails above **2%** of
 pixels changed. Size changes always fail. A failed comparison writes a
