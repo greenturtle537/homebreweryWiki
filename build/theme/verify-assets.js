@@ -77,7 +77,10 @@ function urlTargets( css ) {
         targets.push( {
             url: url,
             index: match.index,
-            skip: /^(?:data:|https?:|\/\/|#)/i.test( url.replace( /[?#].*$/, '' ) )
+            // Test the raw value: stripping the fragment first would turn
+            // `#id` into an empty string, which resolves to the stylesheet
+            // directory and counts as a present file.
+            skip: /^(?:data:|https?:|\/\/|#)/i.test( url )
         } );
     }
 
