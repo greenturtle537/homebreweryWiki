@@ -595,6 +595,7 @@
             next: function () {
                 var line;
                 var text;
+                var itemIndent;
                 if ( index >= lines.length ) {
                     return null;
                 }
@@ -649,7 +650,17 @@
                     return { prose: true, text: text };
                 }
 
-                listIndent = listContentIndent( line );
+                // A line indented at or past the item's content indent
+                // continues that item, so it stays open and the code
+                // threshold stays relative to it; anything shallower ends
+                // the item and returns to the top-level threshold.
+                itemIndent = listContentIndent( line );
+                if ( itemIndent !== null ) {
+                    listIndent = itemIndent;
+                } else if ( listIndent === null ||
+                        indentColumns( line ) < listIndent ) {
+                    listIndent = null;
+                }
                 blockBoundary = ATX_HEADING.test( line ) ||
                     RULE_OR_SETEXT.test( line );
                 return { prose: true, text: text };

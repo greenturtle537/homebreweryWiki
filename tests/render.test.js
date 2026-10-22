@@ -2006,6 +2006,43 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
             ok( !tabbedDoc || !tabbedDoc.querySelector( '.hbw-footnotes' ),
                 'E4B4 ' + spec.name + ': space-then-tab code makes no note' );
 
+            // A paragraph continuation keeps the list item open, so a
+            // four-space line after it is still item prose, not top-level
+            // code: tokens rewrite and definitions extract there.
+            var cont = makePage(
+                '- item\n\n    continuation\n\n    [[Page Two]]\n',
+                {
+                    withHomebrewery: spec.options.withHomebrewery === true,
+                    wikiBase: 'http://wiki.example.test/index.php?title='
+                }
+            );
+            var contDoc = frameDocOf( cont );
+            ok( !!contDoc && !contDoc.querySelector( '.page pre' ),
+                'E4B4 ' + spec.name + ': post-continuation indent stays prose' );
+            ok( !!contDoc && !!contDoc.querySelector( 'a[href$="Page_Two"]' ),
+                'E4B4 ' + spec.name + ': token in a list continuation still links' );
+
+            var contNote = makePage(
+                '- item\n\n    continuation\n\n    [^f]: note body\n\nCite [^f].\n',
+                spec.options
+            );
+            var contNoteDoc = frameDocOf( contNote );
+            var contNotes = contNoteDoc ? contNoteDoc.querySelector( '.hbw-footnotes' ) : null;
+            ok( !!contNotes && contNotes.textContent.indexOf( 'note body' ) !== -1,
+                'E4B4 ' + spec.name + ': definition in a list continuation still extracts' );
+
+            // Six columns past the item (content indent 2 + 4) is code.
+            var contCode = makePage(
+                '- item\n\n    continuation\n\n      [^c]: inside code\n',
+                spec.options
+            );
+            var contCodeDoc = frameDocOf( contCode );
+            var contCodeEl = contCodeDoc ? contCodeDoc.querySelector( '.page pre code' ) : null;
+            ok( !!contCodeEl && contCodeEl.textContent.indexOf( '[^c]:' ) !== -1,
+                'E4B4 ' + spec.name + ': six columns past the item is code' );
+            ok( !contCodeDoc || !contCodeDoc.querySelector( '.hbw-footnotes' ),
+                'E4B4 ' + spec.name + ': post-continuation code makes no note' );
+
             // Wiki tokens inside an indented block are code: they stay
             // literal, exactly like tokens inside a fence.
             var token = makePage(
