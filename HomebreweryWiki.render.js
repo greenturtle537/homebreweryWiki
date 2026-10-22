@@ -58,6 +58,29 @@
     var OVERFLOW_SLACK = 1;
 
     /**
+     * Page style from a leading fence (E4B6).
+     *
+     * Upstream keeps a brew's stylesheet apart from its markdown, so authors
+     * ship it as a leading ` ```css ` fence (the demo does exactly that). The
+     * fence is data for the page, not content: it is lifted out before the
+     * markdown is rendered and applied to the frame document only.
+     *
+     * @type {string}
+     */
+    var STYLE_ATTR = 'data-hbw-style';
+    var STYLE_ELEMENT_CLASS = 'hbw-page-style';
+    /** Refuse an oversized block rather than paste it into the frame. */
+    var STYLE_MAX_LENGTH = 32768;
+    /**
+     * Leading fence whose info string is `css`, per CommonMark: up to three
+     * spaces of indentation, never a tab. A tab is four columns of code
+     * indentation, so `\t ```css ` opens an indented code block and must stay
+     * a code sample rather than becoming the page's stylesheet.
+     */
+    var STYLE_FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*css[ \t]*$/i;
+    var STYLE_FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+
+    /**
      * Sandbox for the render host (E3.5S6).
      *
      * `allow-same-origin` lets the parent write the sanitized brew DOM into
@@ -1595,6 +1618,149 @@
     }
 
     /**
+     * Lift a leading ` ```css ` fence out of the brew source (E4B6).
+     *
+     * Only a fence that opens the brew counts: an author who puts CSS in the
+     * middle of a page meant a code sample, and markdown says so too. An
+     * unclosed fence stays in the source for the same reason — there is no
+     * block to lift, and swallowing the rest of the brew would be worse.
+     *
+     * @param {string} text raw brew source
+     * @return {{text: string, css: string}} source without the fence and its body
+     */
+    function extractPageStyle( text ) {
+        var source = String( text );
+        var lines = source.split( /\r\n|\r|\n/ );
+        var open = -1;
+        var close = -1;
+        var marker;
+        var fence;
+        var rest;
+        var i;
+
+        for ( i = 0; i < lines.length; i++ ) {
+            if ( !/^\s*$/.test( lines[ i ] ) ) {
+                open = i;
+                break;
+            }
+        }
+        if ( open === -1 ) {
+            return { text: source, css: '' };
+        }
+        marker = STYLE_FENCE_OPEN.exec( lines[ open ] );
+        if ( !marker ) {
+            return { text: source, css: '' };
+        }
+        fence = marker[ 1 ];
+        for ( i = open + 1; i < lines.length; i++ ) {
+            marker = STYLE_FENCE_CLOSE.exec( lines[ i ] );
+            if ( marker && marker[ 1 ].charAt( 0 ) === fence.charAt( 0 ) &&
+                marker[ 1 ].length >= fence.length ) {
+                close = i;
+                break;
+            }
+        }
+        if ( close === -1 ) {
+            return { text: source, css: '' };
+        }
+        rest = lines.slice( close + 1 );
+        while ( rest.length && /^\s*$/.test( rest[ 0 ] ) ) {
+            rest.shift();
+        }
+        return {
+            text: rest.join( '\n' ),
+            css: lines.slice( open + 1, close ).join( '\n' )
+        };
+    }
+
+    /**
+     * Decode CSS escapes to their literal characters (E4B6).
+     *
+     * `@\69mport` is `@import` to a CSS parser, so the forbidden constructs
+     * have to be looked for after unescaping; otherwise a block is declared
+     * applied while the browser still loads what it asked for. Hex escapes
+     * are `\` + up to six hex digits + optional whitespace; any other
+     * escaped character stands for itself.
+     *
+     * @param {string} css stylesheet text
+     * @return {string} text with escapes resolved
+     */
+    function decodeCssEscapes( css ) {
+        return String( css || '' )
+            .replace( /\\([0-9a-fA-F]{1,6})[ \t\r\n\f]?/g, function ( match, hex ) {
+                var code = parseInt( hex, 16 );
+                if ( !( code > 0 && code <= 0xffff ) ) {
+                    return '';
+                }
+                return String.fromCharCode( code );
+            } )
+            .replace( /\\(.)/g, '$1' );
+    }
+
+    /**
+     * Decide whether a brew stylesheet may be applied (E4B6).
+     *
+     * The frame is a sandboxed, script-free document, and its CSP already
+     * limits what CSS may load (`img-src 'self' data:`), so the CSS cannot
+     * escape the page. What it must not do is pull a second stylesheet with
+     * `@import`, or carry legacy script bindings; a block that tries is not
+     * applied at all and the fence stays visible as code, which is the honest
+     * failure for an author who wrote something the wiki will not run.
+     *
+     * @param {string} css fence body
+     * @return {?string} CSS to apply, or null when the block is refused
+     */
+    function sanitizePageCss( css ) {
+        var cleaned = String( css || '' );
+        var decoded;
+
+        if ( cleaned.length > STYLE_MAX_LENGTH ) {
+            return null;
+        }
+        decoded = decodeCssEscapes( cleaned );
+        if ( /<\/style/i.test( decoded ) ) {
+            return null;
+        }
+        if ( /@import|expression\s*\(|behavior\s*:|-moz-binding|javascript\s*:/i.test( decoded ) ) {
+            return null;
+        }
+        return /\S/.test( decoded ) ? cleaned : '';
+    }
+
+    /**
+     * Write a brew's page style into the frame document (E4B6).
+     *
+     * The `<style>` sits in the frame, after the theme link, so the author's
+     * rules win at equal specificity and nothing reaches the wiki page itself.
+     * `textContent` is used deliberately: the fence body is CSS text, never
+     * markup the browser may parse.
+     *
+     * @param {Document} doc frame document
+     * @param {string} css sanitized stylesheet
+     * @return {void}
+     */
+    function applyPageStyle( doc, css ) {
+        var style;
+
+        if ( !doc ) {
+            return;
+        }
+        style = doc.querySelector( 'style.' + STYLE_ELEMENT_CLASS );
+        if ( !css ) {
+            if ( style && style.parentNode ) {
+                style.parentNode.removeChild( style );
+            }
+            return;
+        }
+        if ( !style ) {
+            style = doc.createElement( 'style' );
+            style.className = STYLE_ELEMENT_CLASS;
+            ( doc.head || doc.documentElement ).appendChild( style );
+        }
+        style.textContent = css;
+    }
+
+    /**
      * Columns a page's content occupies (E4B1).
      *
      * The theme fills columns with `column-fill: auto`, so content past the
@@ -1969,6 +2135,9 @@
 
         function finish() {
             var doc;
+            var styleBlock;
+            var pageCss;
+            var styleState = '';
             var pageSources;
             var footnoteData;
             var renderedPages;
@@ -1989,8 +2158,19 @@
             }
 
             activeRenderer = null;
+            // A leading ````css` fence is the brew's stylesheet, not content (E4B6).
+            styleBlock = extractPageStyle( text );
+            pageCss = styleBlock.css ? sanitizePageCss( styleBlock.css ) : '';
+            if ( pageCss === null ) {
+                // Refused: keep the fence in the markdown so it stays visible.
+                pageCss = '';
+                styleBlock = { text: text, css: '' };
+                styleState = 'refused';
+            } else if ( pageCss ) {
+                styleState = 'applied';
+            }
             try {
-                pageSources = splitPages( text );
+                pageSources = splitPages( styleBlock.text );
                 footnoteData = extractFootnotes( pageSources );
                 renderedPages = renderPages(
                     footnoteData.pages, footnoteData.notes, wikiConfig
@@ -2009,6 +2189,7 @@
             }
 
             injectTheme( doc, theme );
+            applyPageStyle( doc, pageCss );
             pagesNode = buildPagesInto(
                 doc, renderedPages, footnoteData.pages, footnoteData.notes,
                 wikiConfig
@@ -2017,6 +2198,9 @@
 
             host.setAttribute( 'data-hbw-render', 'html' );
             host.setAttribute( 'data-hbw-pages', String( renderedPages.length ) );
+            if ( styleState ) {
+                host.setAttribute( STYLE_ATTR, styleState );
+            }
             if ( activeRenderer ) {
                 host.setAttribute( 'data-hbw-renderer', activeRenderer );
             }
