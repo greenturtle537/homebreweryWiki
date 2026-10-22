@@ -2113,5 +2113,83 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'E4B1: the page base reset matches the app box model' );
 }() );
 
+// --- E4B6: a leading css fence is page style, not rendered text ---
+( function () {
+    var source = '```css\n' +
+        '.page { padding-bottom : 1.1cm; }\n' +
+        '.note { border-color : rgb( 0, 128, 0 ); }\n' +
+        '```\n\n' +
+        '# Styled Brew\n\nA paragraph after the fence.\n';
+    var page = makePage( source );
+    var host = hostOf( page );
+    var doc = frameDocOf( page );
+    var rendered = renderRoot( page );
+    var style = doc ? doc.querySelector( 'style.hbw-page-style' ) : null;
+
+    ok( !!host && host.getAttribute( 'data-hbw-style' ) === 'applied',
+        'E4B6: a leading css fence is reported as applied' );
+    ok( !!style, 'E4B6: the stylesheet lands in the frame document' );
+    ok( !!style && style.textContent.indexOf( '.page { padding-bottom' ) !== -1,
+        'E4B6: the fence body is applied verbatim' );
+    ok( !!style && style.textContent.indexOf( 'border-color' ) !== -1,
+        'E4B6: later rules in the fence survive' );
+    ok( !!doc && doc.head.contains( style ),
+        'E4B6: the stylesheet is in the frame head' );
+    ok( !page.win.document.querySelector( 'style.hbw-page-style' ),
+        'E4B6: the stylesheet does not reach the wiki document' );
+    ok( !!rendered && !rendered.querySelector( 'pre' ),
+        'E4B6: the fence is not rendered as a code block' );
+    ok( !!rendered && !!rendered.querySelector( 'h1' ) &&
+        rendered.querySelector( 'h1' ).textContent === 'Styled Brew',
+        'E4B6: the brew body follows the fence unchanged' );
+}() );
+
+// --- E4B6: a fence is only lifted where markdown would treat it as one ---
+( function () {
+    var midBrew = makePage(
+        '# Title\n\n```css\n.page { color : red; }\n```\n'
+    );
+    var midDoc = frameDocOf( midBrew );
+    ok( !!hostOf( midBrew ) && hostOf( midBrew ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: a fence after the first block is not page style' );
+    ok( !!midDoc && !midDoc.querySelector( 'style.hbw-page-style' ),
+        'E4B6: a mid-brew fence injects nothing' );
+    ok( !!renderRoot( midBrew ) && !!renderRoot( midBrew ).querySelector( 'pre code' ),
+        'E4B6: a mid-brew fence stays a code block' );
+
+    var infoString = makePage( '# Title\n\n```js\nalert( 1 );\n```\n' );
+    ok( !!hostOf( infoString ) && hostOf( infoString ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: a leading fence with another language stays code' );
+
+    var unclosed = makePage( '```css\n.page { color : red; }\n' );
+    ok( !!hostOf( unclosed ) && hostOf( unclosed ).getAttribute( 'data-hbw-style' ) === null,
+        'E4B6: an unclosed fence is not applied' );
+}() );
+
+// --- E4B6: a stylesheet that would escape its terms is refused, not run ---
+( function () {
+    var cases = [
+        { name: '@import', css: '@import url( "//example.com/x.css" );\n.page { color : red; }' },
+        { name: 'legacy binding', css: '.page { behavior : url( #default#userdata ); }' },
+        { name: 'closing tag', css: '.page { color : red; } </style><script>1</script>' }
+    ];
+
+    cases.forEach( ( spec ) => {
+        var page = makePage(
+            '```css\n' + spec.css + '\n```\n\n# Title\n\nBody.\n'
+        );
+        var doc = frameDocOf( page );
+        var rendered = renderRoot( page );
+        ok( !!hostOf( page ) && hostOf( page ).getAttribute( 'data-hbw-style' ) === 'refused',
+            'E4B6 ' + spec.name + ': the block is reported as refused' );
+        ok( !!doc && !doc.querySelector( 'style.hbw-page-style' ),
+            'E4B6 ' + spec.name + ': nothing is injected' );
+        ok( !!rendered && !!rendered.querySelector( 'pre code' ),
+            'E4B6 ' + spec.name + ': the fence stays visible as code' );
+        ok( !!doc && !doc.querySelector( 'script' ),
+            'E4B6 ' + spec.name + ': no script reaches the frame' );
+    } );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );

@@ -28,6 +28,7 @@ Fixtures and golden provenance:
 |---|---|---|
 | `three-page-brew.md` | page split, `\column`, numbering | the Homebrewery app |
 | `rich-brew.md` | clipping, note box, table, list, quote, both markers | this renderer |
+| `styled-brew.md` | leading ` ```css ` style fence applied as page style | this renderer |
 
 `rich-brew.md` exists because the older fixture — three pages of one heading
 and one sentence — cannot clip, so nothing measured the failure in E4B1. Its
@@ -44,6 +45,23 @@ HBW_PARITY_ACCEPT=1 npm run parity
 
 That writes only fixtures marked `upstream: false` and must be reviewed like
 any other golden change.
+
+## Page style from a leading fence (E4B6)
+
+A brew may open with a fenced ` ```css ` block. Upstream keeps a
+brew's stylesheet apart from its markdown and the demo ships it as that fence,
+so the renderer lifts it out before rendering and writes it into the frame
+document as `<style class="hbw-page-style">`, after the theme link. It never
+reaches the wiki page: the frame is script-free and the CSP bounds what CSS may
+load, so the sheet cannot escape its page.
+
+The fence is only lifted where markdown would treat it as one — first thing in
+the brew, info string `css`, closed. Anything else stays a code block. A block
+carrying `@import`, `expression(`, `behavior:`, `-moz-binding` or a `</style`
+sequence is refused outright: the fence stays visible as code and the host
+reports `data-hbw-style="refused"`. `styled-brew.md` pins the happy path,
+including the page's computed `padding-bottom` (41.57px, from the fence, not the
+theme's 64.25px).
 
 Pixel comparison uses pixelmatch threshold `0.1` and fails above **2%** of
 pixels changed. Size changes always fail. A failed comparison writes a
