@@ -143,7 +143,11 @@ function resolveTarget( cssFile, url, base ) {
     var clean = url.replace( /[?#].*$/, '' );
 
     if ( clean.charAt( 0 ) === '/' ) {
-        return base ? path.join( base, clean ) : null;
+        // A browser resolves `/../../x` against the origin, not the
+        // filesystem, so traversal above the URL root stops at `/x`.  Join
+        // the normalized path, or `..` segments would walk out of the
+        // document root and a file out there could vouch for a missing one.
+        return base ? path.join( base, path.posix.normalize( clean ) ) : null;
     }
 
     return path.resolve( path.dirname( cssFile ), clean );
