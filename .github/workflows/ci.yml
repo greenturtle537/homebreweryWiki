@@ -33,6 +33,11 @@ jobs:
       - name: Install pinned theme fonts and textures
         run: sh build/theme/fetch-assets.sh
 
+      # A checkout that skipped the fetch step serves a theme whose fonts and
+      # textures 404 silently, so fail here instead of in the browser (E4B2).
+      - name: Verify theme assets
+        run: npm run verify:assets
+
       - name: Install headless Chromium
         run: npx playwright install --with-deps chromium
 
@@ -56,6 +61,11 @@ jobs:
 
       - name: Install pinned theme fonts and textures
         run: sh build/theme/fetch-assets.sh
+
+      # A checkout that skipped the fetch step serves a theme whose fonts and
+      # textures 404 silently, so fail here instead of in the browser (E4B2).
+      - name: Verify theme assets
+        run: npm run verify:assets
 
       - name: Install headless Chromium
         run: npx playwright install --with-deps chromium
