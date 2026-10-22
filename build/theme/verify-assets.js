@@ -132,6 +132,22 @@ function srcRanges( css ) {
 }
 
 /**
+ * Whether an absolute path stays inside a directory.
+ *
+ * @param {string} base directory, absolute
+ * @param {string} target path, absolute
+ * @return {boolean} true when `target` is `base` or below it
+ */
+function isInside( base, target ) {
+    var relative = path.relative( path.resolve( base ), target );
+
+    return relative === '' ||
+        ( relative !== '..' &&
+            relative.indexOf( '..' + path.sep ) !== 0 &&
+            !path.isAbsolute( relative ) );
+}
+
+/**
  * Where a target resolves for a given stylesheet.
  *
  * @param {string} cssFile absolute stylesheet path
@@ -141,13 +157,25 @@ function srcRanges( css ) {
  */
 function resolveTarget( cssFile, url, base ) {
     var clean = url.replace( /[?#].*$/, '' );
+    var normalized;
+    var resolved;
 
     if ( clean.charAt( 0 ) === '/' ) {
+        if ( !base ) {
+            return null;
+        }
+
         // A browser resolves `/../../x` against the origin, not the
-        // filesystem, so traversal above the URL root stops at `/x`.  Join
-        // the normalized path, or `..` segments would walk out of the
-        // document root and a file out there could vouch for a missing one.
-        return base ? path.join( base, path.posix.normalize( clean ) ) : null;
+        // filesystem, so traversal above the URL root stops at `/x`.
+        // Separators are normalized first, because CSS backslashes reach us
+        // verbatim while `path` treats `\` as a separator on Windows only —
+        // `url(/assets\..\..\outside)` must not resolve outside the root.
+        // The containment check then covers whatever spelling is left: an
+        // outside file must never vouch for a missing asset.
+        normalized = path.posix.normalize( clean.replace( /\\/g, '/' ) );
+        resolved = path.resolve( base, '.' + normalized );
+
+        return isInside( base, resolved ) ? resolved : null;
     }
 
     return path.resolve( path.dirname( cssFile ), clean );
