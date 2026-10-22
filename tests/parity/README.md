@@ -1,6 +1,6 @@
 # Parity and golden regression harness (E3.5S5)
 
-`npm run parity` loads `tests/fixtures/three-page-brew.md` through the real
+`npm run parity` loads every fixture in its `fixtures` list through the real
 production path: `HomebreweryWiki.shell.html`, `HomebreweryWiki.render.js`, and
 the compiled upstream theme pinned at **Homebrewery v3.21.0**. The repository is
 served over Playwright routes on `http://hbw.test`, so the iframe, theme,
@@ -16,7 +16,34 @@ The check asserts:
   `allow-same-origin allow-top-navigation-by-user-activation` (never
   `allow-scripts`) and `referrerpolicy="no-referrer"`;
 - every same-origin asset request succeeds, with zero outbound requests;
-- each 816 CSS px page matches `goldens/three-page-brew-<n>.png`.
+- the column-overflow signal (E4B1) is present exactly when the fixture
+  overruns: `data-hbw-overflow="<pages>"` on the host and `.pages`, the column
+  count on each overfull `.page`, and a notice in the host above the frame that
+  names the clipped pages — and absent for a fixture that fits;
+- each 816 CSS px page matches `goldens/<fixture>-<n>.png`.
+
+Fixtures and golden provenance:
+
+| Fixture | Covers | Goldens from |
+|---|---|---|
+| `three-page-brew.md` | page split, `\column`, numbering | the Homebrewery app |
+| `rich-brew.md` | clipping, note box, table, list, quote, both markers | this renderer |
+
+`rich-brew.md` exists because the older fixture — three pages of one heading
+and one sentence — cannot clip, so nothing measured the failure in E4B1. Its
+golden is recorded from this renderer rather than the app: the app's editor
+keeps the demo brew's style tab (`.page { padding-bottom: 1.1cm }`), which
+changes the column height and therefore every line break on a full page. An
+app capture of a full page is not a stable target; the structural assertions
+above are what pin the behaviour, and the golden pins this renderer's output.
+Record or refresh it with:
+
+```sh
+HBW_PARITY_ACCEPT=1 npm run parity
+```
+
+That writes only fixtures marked `upstream: false` and must be reviewed like
+any other golden change.
 
 Pixel comparison uses pixelmatch threshold `0.1` and fails above **2%** of
 pixels changed. Size changes always fail. A failed comparison writes a

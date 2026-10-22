@@ -2079,5 +2079,39 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'link colour: the red-link rule is still declared' );
 }() );
 
+// --- E4B1: column overflow is reported without changing the layout ---
+( function () {
+    var page = makePage( '# Fits\n\nA short brew that needs one column.\n' );
+    var host = hostOf( page );
+    var doc = page.win.document;
+    var rendered = renderRoot( page );
+
+    // jsdom has no layout, so scrollWidth is 0 and nothing may be flagged; the
+    // notice must never be invented. The positive case is asserted in the
+    // parity suite, which renders a fixture that overruns in Chromium.
+    ok( !!host && host.getAttribute( 'data-hbw-overflow' ) === null,
+        'E4B1: no overflow attribute when layout is unavailable' );
+    ok( !doc.querySelector( '.hbw-overflow-notice' ),
+        'E4B1: no overflow notice when layout is unavailable' );
+    ok( !!rendered && !rendered.querySelector( '[data-hbw-overflow]' ),
+        'E4B1: no page is flagged without layout' );
+
+    var themeSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.theme.css' ), 'utf8'
+    );
+    ok( /\.hbw-brew \.hbw-overflow-notice\s*\{/.test( themeSource ),
+        'E4B1: the overflow notice is styled on the host' );
+    ok( /@media print[\s\S]*\.hbw-brew \.hbw-overflow-notice\s*\{\s*display:\s*none/.test( themeSource ),
+        'E4B1: the overflow notice is dropped from print' );
+
+    var shellSource = fs.readFileSync(
+        path.join( root, 'HomebreweryWiki.shell.html' ), 'utf8'
+    );
+    ok( /\.brewRenderer \.page > \.columnWrapper > :first-child\s*\{\s*margin-top:\s*0/.test( shellSource ),
+        'E4B1: the page base reset keeps the first block flush' );
+    ok( /\.brewRenderer \*\s*\{\s*box-sizing:\s*border-box/.test( shellSource ),
+        'E4B1: the page base reset matches the app box model' );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );

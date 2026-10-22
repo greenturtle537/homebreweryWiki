@@ -35,6 +35,21 @@
     font-family: monospace;
 }
 
+/* E4B1: column overflow is clipped by the theme, so the author is told in the
+ * host chrome instead of finding half a sentence at the page edge. Parent side,
+ * not the iframe: the page stack keeps the theme's geometry, page screenshots
+ * stay comparable with the app, and the notice can be dropped from print. */
+.hbw-brew .hbw-overflow-notice {
+    margin: 0 0 10px;
+    padding: 6px 10px;
+    border-left: 4px solid #58180d;
+    background: rgba(88, 24, 13, 0.07);
+    color: #1d1d1b;
+    font-family: sans-serif;
+    font-size: 12px;
+    line-height: 18px;
+}
+
 /* E3.5S4: the print route is a full-window shell, never the wiki page with
  * brew CSS injected. If the parent is printed anyway, the frame takes the
  * full sheet and the wiki chrome stays out of the way. */
@@ -58,5 +73,9 @@
         left: 0;
         top: 0;
         width: 100%;
+    }
+    /* E4B1: the notice is a reading aid for the screen, not part of the sheet. */
+    .hbw-brew .hbw-overflow-notice {
+        display: none !important;
     }
 }

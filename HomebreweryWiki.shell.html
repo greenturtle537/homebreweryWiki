@@ -16,6 +16,22 @@ html, body {
 body {
     overflow: hidden;
 }
+/* App base reset (E4B1 fixture): upstream's application stylesheet normalises
+ * box sizing, sets a unit line-height and drops the first block's top margin
+ * at the top of a page; the theme assumes that reset and does not repeat it.
+ * Without it the same markdown lays out differently here and in the app —
+ * a `.note` grows 14px wide and 44px tall, and a page's first heading drops
+ * 22px — which is enough to move a float into the next column. */
+.brewRenderer,
+.brewRenderer * {
+    box-sizing: border-box;
+}
+.brewRenderer {
+    line-height: 1;
+}
+.brewRenderer .page > .columnWrapper > :first-child {
+    margin-top: 0;
+}
 .pages {
     margin: 0;
     padding: 0;

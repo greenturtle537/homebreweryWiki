@@ -47,6 +47,17 @@
     var FOOTNOTE_BACK_CLASS = 'hbw-footnote-back';
 
     /**
+     * Overflow signal (E4B1). The attribute carries the pages that overran
+     * and, on a `.page`, the number of columns its content wanted.
+     *
+     * @type {string}
+     */
+    var OVERFLOW_ATTR = 'data-hbw-overflow';
+    var OVERFLOW_NOTICE_CLASS = 'hbw-overflow-notice';
+    /** Sub-pixel slack before content counts as past the page edge. */
+    var OVERFLOW_SLACK = 1;
+
+    /**
      * Sandbox for the render host (E3.5S6).
      *
      * `allow-same-origin` lets the parent write the sanitized brew DOM into
@@ -1584,6 +1595,141 @@
     }
 
     /**
+     * Columns a page's content occupies (E4B1).
+     *
+     * The theme fills columns with `column-fill: auto`, so content past the
+     * last one is laid out into further columns and then clipped by
+     * `.page { overflow: clip }`: neither lost nor reachable. `scrollWidth` of
+     * the wrapper counts every column the content wants, which is what a
+     * reader needs to be told about.
+     *
+     * @param {HTMLElement} wrapper `.columnWrapper` of one page
+     * @return {number} columns the content wants; 0 when it fits
+     */
+    function usedColumns( wrapper ) {
+        var view = wrapper.ownerDocument.defaultView || window;
+        var client = wrapper.clientWidth;
+        var scroll = wrapper.scrollWidth;
+        var style = view.getComputedStyle ? view.getComputedStyle( wrapper ) : null;
+        var count = style ? parseInt( style.columnCount, 10 ) : 0;
+        var gap = style ? parseFloat( style.columnGap ) : 0;
+        var column;
+        var columns;
+
+        if ( !client || !scroll || scroll <= client + OVERFLOW_SLACK ) {
+            return 0;
+        }
+        // The theme asks for `column-count`, but a brew's own style may ask
+        // for `column-width`; either way one used column is `client` wide.
+        count = count > 0 ? count : 1;
+        gap = isFinite( gap ) ? gap : 0;
+        column = ( client - gap * ( count - 1 ) ) / count;
+        if ( !( column > 0 ) ) {
+            return 0;
+        }
+        columns = Math.round( ( scroll + gap ) / ( column + gap ) );
+        return columns > count ? columns : count + 1;
+    }
+
+    /**
+     * Show or clear the host-side overflow notice (E4B1).
+     *
+     * The notice lives in the wiki document, above the frame, not inside the
+     * brew: it must not shift the page stack, because page geometry belongs to
+     * the theme, and it must not appear in page screenshots or printed sheets.
+     *
+     * @param {HTMLElement} host wiki brew host
+     * @param {string[]} parts one phrase per overfull page
+     * @return {void}
+     */
+    function showOverflowNotice( host, parts ) {
+        var notice = host.querySelector
+            ? host.querySelector( '.' + OVERFLOW_NOTICE_CLASS )
+            : null;
+        var text;
+
+        if ( !parts.length ) {
+            if ( notice && notice.parentNode ) {
+                notice.parentNode.removeChild( notice );
+            }
+            return;
+        }
+        if ( !notice ) {
+            notice = document.createElement( 'div' );
+            notice.className = OVERFLOW_NOTICE_CLASS;
+            notice.setAttribute( 'role', 'status' );
+        }
+        while ( notice.firstChild ) {
+            notice.removeChild( notice.firstChild );
+        }
+        text = 'This brew does not fit its pages: ' + parts.join( '; ' ) +
+            '. Move the overrunning text onto another page with \\page.';
+        notice.appendChild( document.createTextNode( text ) );
+        if ( !notice.parentNode ) {
+            host.insertBefore( notice, host.firstChild );
+        }
+    }
+
+    /**
+     * Flag pages whose content overruns the columns that fit (E4B1).
+     *
+     * The clipping itself stays: it is what upstream does, and re-flowing the
+     * excess onto new pages would change page counts, anchors and numbering.
+     * What changes is the silence. Each overfull `.page` gets
+     * `data-hbw-overflow="<columns>"`; the `.pages` node and the wiki host get
+     * the page numbers; a notice above the frame says it in words, because a
+     * reader should not have to notice a glyph cut in half.
+     *
+     * @param {HTMLElement} pagesNode `.pages`
+     * @param {HTMLElement} host wiki brew host
+     * @return {void}
+     */
+    function markOverflow( pagesNode, host ) {
+        var pages = pagesNode.children || [];
+        var overfull = [];
+        var parts = [];
+        var page;
+        var wrapper;
+        var columns;
+        var i;
+
+        for ( i = 0; i < pages.length; i++ ) {
+            page = pages[ i ];
+            if ( !page.getAttribute || ( ' ' + ( page.className || '' ) + ' ' )
+                .indexOf( ' ' + PAGE_CLASS + ' ' ) === -1 ) {
+                continue;
+            }
+            wrapper = page.querySelector( '.' + COLUMN_WRAPPER_CLASS );
+            columns = wrapper ? usedColumns( wrapper ) : 0;
+            if ( columns ) {
+                page.setAttribute( OVERFLOW_ATTR, String( columns ) );
+                overfull.push( i + 1 );
+                parts.push( 'page ' + ( i + 1 ) + ' needs ' + columns +
+                    ' columns and is clipped at the page edge' );
+            } else {
+                page.removeAttribute( OVERFLOW_ATTR );
+            }
+        }
+
+        if ( overfull.length ) {
+            pagesNode.setAttribute( OVERFLOW_ATTR, overfull.join( ',' ) );
+        } else {
+            pagesNode.removeAttribute( OVERFLOW_ATTR );
+        }
+
+        if ( host && host.setAttribute ) {
+            if ( overfull.length ) {
+                host.setAttribute( OVERFLOW_ATTR, overfull.join( ',' ) );
+            } else if ( host.removeAttribute ) {
+                host.removeAttribute( OVERFLOW_ATTR );
+            }
+        }
+        if ( host && host.querySelector ) {
+            showOverflowNotice( host, parts );
+        }
+    }
+
+    /**
      * Fit the page stack to the pane (E3.5S4T1/T2).
      *
      * Pages stay true letter size inside the iframe; the parent writes a
@@ -1628,6 +1774,11 @@
         frame.style.width = printMode ? pageWidth + 'px' : '100%';
         frame.style.height = height + 'px';
         frame.setAttribute( 'data-hbw-scale', String( scale ) );
+
+        // Column overflow is a layout fact, so it is measured on every refit:
+        // the theme stylesheet and the fonts arrive after the first pass and
+        // both change how much of the page the text occupies (E4B1).
+        markOverflow( pagesNode, host );
     }
 
     /**
