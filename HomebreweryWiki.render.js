@@ -805,8 +805,14 @@
                     ( size ? ' style="width: ' + escapeHtml( size ) + '; height: auto"' : '' ) +
                     '>';
             }
+            // E4B9: neutralise `://` in the visible text so the markdown
+            // autolinker cannot turn the placeholder into an outbound anchor.
+            // The title attribute keeps the raw name; attributes are not
+            // autolinked.  `&#58;` decodes to a colon in the browser, so the
+            // reader still sees the URL.
             return '<span class="hbw-missing-file" title="Missing file: ' +
-                escapeHtml( name ) + '">[File: ' + escapeHtml( name ) + ']</span>';
+                escapeHtml( name ) + '">[File: ' +
+                escapeHtml( name ).replace( /:\/\//g, '&#58;//' ) + ']</span>';
         }
 
         if ( !config.base ) {
