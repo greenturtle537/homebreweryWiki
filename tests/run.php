@@ -701,6 +701,18 @@ $escapedFiles = HomebreweryWiki::brewFileMap( $escapedText );
 t_assert( isset( $escapedFiles['HbwTestMissing.png'] ),
     'E4B7 file map: escaped pipe separator' );
 
+// --- E4B7: only the backslash escaping the separator is dropped ---
+$backslashText = "[[PageA\\\\|label]]\n"
+    . "[[PageB\\\\]]\n"
+    . "[[PageC\\]]\n";
+$backslashTargets = HomebreweryWiki::brewLinkTargets( $backslashText );
+t_assert( in_array( 'PageA\\', $backslashTargets, true ),
+    'E4B7 link targets: one backslash kept before the separator' );
+t_assert( in_array( 'PageB\\\\', $backslashTargets, true ),
+    'E4B7 link targets: two backslashes kept when no separator follows' );
+t_assert( in_array( 'PageC\\', $backslashTargets, true ),
+    'E4B7 link targets: a single backslash is not a separator escape' );
+
 // --- E3.5S3: source-token extraction (categories, links, files) ---
 $catText = "[[Category:E35 Test]]\n"
     . "[[Category:E35 Test|Sort key]]\n"
