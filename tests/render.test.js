@@ -2349,5 +2349,94 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'E4B8: only the real mustache becomes a span' );
 }() );
 
+// --- E4S5: the index + previous/next convention renders working links ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var dir = path.join( __dirname, 'fixtures', 'navigation-example' );
+    var links = {
+        'Manual:Example_Brew': true,
+        'Manual:Example_Brew/Chapter_1': true,
+        'Manual:Example_Brew/Chapter_2': true
+    };
+    var sources = {
+        index: fs.readFileSync( path.join( dir, 'index.md' ), 'utf8' ),
+        chapter1: fs.readFileSync( path.join( dir, 'chapter-1.md' ), 'utf8' ),
+        chapter2: fs.readFileSync( path.join( dir, 'chapter-2.md' ), 'utf8' )
+    };
+    var pages = {
+        index: makePage( sources.index, {
+            withHomebrewery: true, wikiBase: base, links: links
+        } ),
+        chapter1: makePage( sources.chapter1, {
+            withHomebrewery: true, wikiBase: base, links: links
+        } ),
+        chapter2: makePage( sources.chapter2, {
+            withHomebrewery: true, wikiBase: base, links: links
+        } )
+    };
+    var roots = {
+        index: renderRoot( pages.index ),
+        chapter1: renderRoot( pages.chapter1 ),
+        chapter2: renderRoot( pages.chapter2 )
+    };
+
+    /**
+     * Decoded wiki target of an anchor, for readable assertions.
+     *
+     * @param {HTMLElement|null} anchor
+     * @return {string}
+     */
+    function targetOf( anchor ) {
+        return anchor
+            ? decodeURIComponent( anchor.getAttribute( 'href' ).substring( base.length ) )
+            : '';
+    }
+
+    /**
+     * First anchor under a root whose decoded target matches.
+     *
+     * @param {HTMLElement|null} root
+     * @param {string} target
+     * @return {HTMLElement|null}
+     */
+    function linkTo( root, target ) {
+        var anchors = root ? root.querySelectorAll( 'a[href]' ) : [];
+        var i;
+        for ( i = 0; i < anchors.length; i++ ) {
+            if ( targetOf( anchors[ i ] ) === target ) {
+                return anchors[ i ];
+            }
+        }
+        return null;
+    }
+
+    var indexChapter1 = linkTo( roots.index, 'Manual:Example_Brew/Chapter_1' );
+    var indexChapter2 = linkTo( roots.index, 'Manual:Example_Brew/Chapter_2' );
+    var ch1Index = linkTo( roots.chapter1, 'Manual:Example_Brew' );
+    var ch1Next = linkTo( roots.chapter1, 'Manual:Example_Brew/Chapter_2' );
+    var ch2Index = linkTo( roots.chapter2, 'Manual:Example_Brew' );
+    var ch2Prev = linkTo( roots.chapter2, 'Manual:Example_Brew/Chapter_1' );
+
+    ok( !!indexChapter1 && !!indexChapter2,
+        'E4S5: the index page links to every chapter' );
+    ok( !!ch1Index && ch1Index.textContent === '\u2190 Index',
+        'E4S5: chapter 1 carries the index link' );
+    ok( !!ch1Next && ch1Next.textContent === 'Chapter 2 \u2014 The Vault \u2192',
+        'E4S5: chapter 1 links forward to chapter 2' );
+    ok( !!ch2Index && ch2Index.textContent === '\u2190 Index',
+        'E4S5: chapter 2 carries the index link' );
+    ok( !!ch2Prev && ch2Prev.textContent === '\u2190 Chapter 1 \u2014 The Cellar',
+        'E4S5: chapter 2 links back to chapter 1' );
+    ok( !!ch1Index && ch1Index.getAttribute( 'target' ) === '_top' &&
+        !!ch2Prev && ch2Prev.getAttribute( 'target' ) === '_top',
+        'E4S5: navigation links navigate the parent page' );
+    ok( !!roots.chapter1 &&
+        roots.chapter1.textContent.indexOf( '\u2190 Index \u00b7 Chapter 2' ) !== -1,
+        'E4S5: the navigation line keeps the documented separator' );
+    ok( pages.index.errors.length === 0 && pages.chapter1.errors.length === 0 &&
+        pages.chapter2.errors.length === 0,
+        'E4S5: no console errors' );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );
