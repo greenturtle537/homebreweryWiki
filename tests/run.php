@@ -687,6 +687,20 @@ if ( $savedAnonRead === null ) {
     $wgGroupPermissions['*']['read'] = $savedAnonRead;
 }
 
+// --- E4B7: a `\|` separator keeps the backslash out of the target ---
+$escapedText = "[[Category:E4B7 Books\\|Shelf]]\n"
+    . "[[Main Page\\|home]]\n"
+    . "[[File:HbwTestMissing.png\\|alt]]\n";
+$escapedCats = HomebreweryWiki::brewCategoryNames( $escapedText );
+t_assert( $escapedCats === array( 'E4B7 Books' ),
+    'E4B7 categories: escaped pipe separator (' . implode( ', ', $escapedCats ) . ')' );
+$escapedTargets = HomebreweryWiki::brewLinkTargets( $escapedText );
+t_assert( $escapedTargets === array( 'Main Page' ),
+    'E4B7 link targets: escaped pipe separator (' . implode( ', ', $escapedTargets ) . ')' );
+$escapedFiles = HomebreweryWiki::brewFileMap( $escapedText );
+t_assert( isset( $escapedFiles['HbwTestMissing.png'] ),
+    'E4B7 file map: escaped pipe separator' );
+
 // --- E3.5S3: source-token extraction (categories, links, files) ---
 $catText = "[[Category:E35 Test]]\n"
     . "[[Category:E35 Test|Sort key]]\n"

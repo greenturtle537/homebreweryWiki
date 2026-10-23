@@ -476,6 +476,21 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Drop the optional `\` of a `\|` argument separator (E4B7).
+	 *
+	 * MediaWiki authors escape the pipe out of table habit, and the renderer
+	 * accepts `[[Page\|label]]` as a link with an argument.  The extracted
+	 * target must lose the backslash too, or the server map keys `Page\`
+	 * while the anchor points at `Page` and a valid link turns red.
+	 *
+	 * @param string $target Token target as captured from source.
+	 * @return string Trimmed target without the separator escape.
+	 */
+	protected static function stripEscapedPipe( $target ) {
+		return rtrim( trim( $target ), '\\' );
+	}
+
+	/**
 	 * Category names declared in brew source (E3.5S3T4).
 	 *
 	 * `[[Category:Name]]` / `[[Category:Name|sort]]` are source-level tokens:
@@ -494,7 +509,7 @@ class HomebreweryWiki {
 		$text = self::brewProseText( $text );
 		if ( preg_match_all( '/\[\[Category:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
 			foreach ( $m[1] as $name ) {
-				$name = trim( $name );
+				$name = self::stripEscapedPipe( $name );
 				if ( $name !== '' && !isset( $names[$name] ) ) {
 					$names[$name] = true;
 				}
@@ -544,7 +559,7 @@ class HomebreweryWiki {
 		$text = self::brewProseText( $text );
 		if ( preg_match_all( '/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/', $text, $m ) ) {
 			foreach ( $m[1] as $target ) {
-				$target = trim( $target );
+				$target = self::stripEscapedPipe( $target );
 				if ( $target === '' ) {
 					continue;
 				}
@@ -741,7 +756,7 @@ class HomebreweryWiki {
 			return $map;
 		}
 		foreach ( $m[1] as $name ) {
-			$name = trim( $name );
+			$name = self::stripEscapedPipe( $name );
 			if ( $name === '' || isset( $map[$name] ) ) {
 				continue;
 			}
