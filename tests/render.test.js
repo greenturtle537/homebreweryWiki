@@ -2318,6 +2318,35 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'E4B8: a block mustache still renders a wiki link' );
     ok( !!blockRendered && !blockRendered.querySelector( 'pre code' ),
         'E4B8: the block mustache content is not code' );
+
+    // Review fix: the body is read from the original line, not the masked
+    // copy, so inline code inside the body keeps its real text.
+    var codeSource = '{{note|`code`}}\n';
+    var codePage = makePage( codeSource, { withHomebrewery: true } );
+    var codeRendered = renderRoot( codePage );
+    var codeSpan = codeRendered ? codeRendered.querySelector( 'span.inline-block' ) : null;
+    ok( !!codeSpan,
+        'E4B8: a mustache body with inline code still renders as a span' );
+    ok( !!codeSpan && codeSpan.textContent.indexOf( '`code`' ) !== -1,
+        'E4B8: inline code in a mustache body stays literal' );
+    ok( !!codeSpan && codeSpan.textContent.indexOf( '\u0000' ) === -1,
+        'E4B8: inline code in a mustache body is not mask filler' );
+
+    // Review fix: restoration is text-node only, so a key that lands in an
+    // attribute is never reparsed into markup or a new attribute.
+    var attrSource = '{{battle|[[Main Page]]}}\n\n'
+        + '<span title="HBWINLINEMUSTACHE1">probe</span>\n';
+    var attrPage = makePage( attrSource, { withHomebrewery: true } );
+    var attrRendered = renderRoot( attrPage );
+    var attrProbe = attrRendered ? attrRendered.querySelector( 'span[title]' ) : null;
+    ok( !!attrProbe,
+        'E4B8: an attribute probe survives sanitizing' );
+    ok( !!attrProbe && attrProbe.getAttribute( 'title' ) === 'HBWINLINEMUSTACHE1',
+        'E4B8: a placeholder key inside an attribute stays literal' );
+    ok( !!attrProbe && attrProbe.children.length === 0,
+        'E4B8: a placeholder key inside an attribute injects no element' );
+    ok( !!attrRendered && attrRendered.querySelectorAll( 'span.inline-block' ).length === 1,
+        'E4B8: only the real mustache becomes a span' );
 }() );
 
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );

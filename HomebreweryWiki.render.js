@@ -403,6 +403,59 @@
     }
 
     /**
+     * Restore inline-mustache placeholders (E4B8).
+     *
+     * Restoration is DOM-based and text-node only.  A key that survives inside
+     * an attribute is left as literal text, so restoration can never create an
+     * attribute (or element) the sanitizer has not already inspected.
+     *
+     * @param {HTMLElement} box sanitized, detached container
+     * @param {Object.<string, Object>} placeholders `{ className, body }` by key
+     */
+    function restorePlaceholders( box, placeholders ) {
+        var doc = box.ownerDocument;
+        var walker = doc.createTreeWalker( box, 4, null, false );
+        var nodes = [];
+        var node;
+        var i;
+        var j;
+        var parts;
+        var entry;
+        var frag;
+        var span;
+
+        if ( !placeholders ) {
+            return;
+        }
+
+        while ( ( node = walker.nextNode() ) !== null ) {
+            nodes.push( node );
+        }
+
+        for ( i = 0; i < nodes.length; i++ ) {
+            node = nodes[ i ];
+            parts = node.nodeValue.split( /(HBWINLINEMUSTACHE\d+)/ );
+            if ( parts.length === 1 || !node.parentNode ) {
+                continue;
+            }
+            frag = doc.createDocumentFragment();
+            for ( j = 0; j < parts.length; j++ ) {
+                entry = ( j % 2 === 1 ) ? placeholders[ parts[ j ] ] : null;
+                if ( entry ) {
+                    span = doc.createElement( 'span' );
+                    span.className = 'inline-block' +
+                        ( entry.className ? ' ' + entry.className : '' );
+                    span.appendChild( doc.createTextNode( entry.body ) );
+                    frag.appendChild( span );
+                } else if ( parts[ j ] !== '' ) {
+                    frag.appendChild( doc.createTextNode( parts[ j ] ) );
+                }
+            }
+            node.parentNode.replaceChild( frag, node );
+        }
+    }
+
+    /**
      * Render markdown to sanitized HTML.  Returns null when the renderer or
      * sanitizer is unavailable (caller then uses the plain-text fallback).
      *
@@ -410,11 +463,12 @@
      * `marked` bundle is kept as the degraded path for browsers that cannot
      * parse the modern bundle.
      *
-     * @param {string} text       raw brew source
-     * @param {number} pageNumber zero-based page index (Homebrewery variable)
+     * @param {string} text         raw brew source
+     * @param {number} pageNumber   zero-based page index (Homebrewery variable)
+     * @param {Object} [placeholders] inline-mustache placeholders to restore
      * @return {string|null}
      */
-    function renderMarkdown( text, pageNumber ) {
+    function renderMarkdown( text, pageNumber, placeholders ) {
         var purifier = window.DOMPurify;
         var homebrewery = window.HomebreweryRenderer;
         var renderer = window.marked;
@@ -452,6 +506,9 @@
         var clean = purifier.sanitize( html, SANITIZE_CONFIG );
         var box = document.createElement( 'div' );
         box.innerHTML = clean;
+        // Restore mustache spans only after sanitizing, then harden the
+        // detached tree again so restored nodes are checked before attach.
+        restorePlaceholders( box, placeholders );
         hardenTree( box );
         return box.innerHTML;
     }
@@ -945,15 +1002,24 @@
             INLINE_MUSTACHE.lastIndex = 0;
             while ( ( mustache = INLINE_MUSTACHE.exec( masked ) ) !== null ) {
                 lineAfterMustache += line.substring( mustacheLast, mustache.index );
-                // Parse the mustache content.  The syntax is {{class|content}}.
-                mustacheContent = mustache[ 0 ].substring( 2, mustache[ 0 ].length - 2 );
+                // Parse the mustache content from the original line: `masked`
+                // only locates the match, so inline code inside the body keeps
+                // its real text instead of NUL filler (E4B8 review).
+                mustacheContent = line.substring(
+                    mustache.index + 2,
+                    mustache.index + mustache[ 0 ].length - 2
+                );
                 pipeIndex = mustacheContent.indexOf( '|' );
                 mustacheClass = pipeIndex === -1 ? mustacheContent : mustacheContent.substring( 0, pipeIndex );
                 mustacheBody = pipeIndex === -1 ? '' : mustacheContent.substring( pipeIndex + 1 );
-                // Generate the span HTML.  The body is left literal.
+                // Remember the span as data, not serialized HTML: restoration
+                // builds DOM nodes in text nodes only (E4B8 review).
                 placeholderId++;
                 placeholderKey = 'HBWINLINEMUSTACHE' + placeholderId;
-                placeholders[ placeholderKey ] = '<span class="inline-block ' + escapeHtml( mustacheClass ) + '">' + escapeHtml( mustacheBody ) + '</span>';
+                placeholders[ placeholderKey ] = {
+                    className: mustacheClass,
+                    body: mustacheBody
+                };
                 lineAfterMustache += placeholderKey;
                 mustacheLast = mustache.index + mustache[ 0 ].length;
             }
@@ -1340,7 +1406,6 @@
         var html;
         var p;
         var placeholders;
-        var key;
 
         for ( p = 0; p < pages.length; p++ ) {
             placeholders = {};
@@ -1350,14 +1415,9 @@
                     footnoteNotes
                 )
             );
-            html = renderMarkdown( pageMarked, p );
+            html = renderMarkdown( pageMarked, p, placeholders );
             if ( html === null ) {
                 return null;
-            }
-            for ( key in placeholders ) {
-                if ( Object.prototype.hasOwnProperty.call( placeholders, key ) ) {
-                    html = html.replace( key, placeholders[ key ] );
-                }
             }
             renderedPages.push( resolveSamePageAnchors( html ) );
         }
@@ -1577,16 +1637,12 @@
             // Note bodies are prose too: expand wiki tokens before rendering
             // so the footnote agrees with the link tables the save hook wrote.
             var notePlaceholders = {};
-            var noteHtml = renderMarkdown(
-                applyWikiTokens( notes[ label ], wikiConfig, notePlaceholders ), 0
+            itemNode.innerHTML = renderMarkdown(
+                applyWikiTokens( notes[ label ], wikiConfig, notePlaceholders ),
+                0,
+                notePlaceholders
             ) || '';
-            var noteKey;
-            for ( noteKey in notePlaceholders ) {
-                if ( Object.prototype.hasOwnProperty.call( notePlaceholders, noteKey ) ) {
-                    noteHtml = noteHtml.replace( noteKey, notePlaceholders[ noteKey ] );
-                }
-            }
-            itemNode.innerHTML = noteHtml;
+            hardenTree( itemNode );
             backLink = doc.createElement( 'a' );
             backLink.setAttribute( 'href', '#hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             backLink.className = FOOTNOTE_BACK_CLASS;
@@ -1652,6 +1708,7 @@
             wrapper = doc.createElement( 'div' );
             wrapper.className = COLUMN_WRAPPER_CLASS;
             wrapper.innerHTML = renderedPages[ p ];
+            hardenTree( wrapper );
             pageNode.appendChild( wrapper );
 
             linkFootnotes( pageSources[ p ], pageNode, notes, p, wikiConfig );
