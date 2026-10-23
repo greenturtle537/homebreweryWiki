@@ -2222,7 +2222,7 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
 // --- E4B9: a URL in a missing-file placeholder is inert ---
 ( function () {
     var source = '[[File:https://example.test/x.png]]\n';
-    var page = makePage( source );
+    var page = makePage( source, { withHomebrewery: true } );
     var rendered = renderRoot( page );
     var text = rendered ? rendered.textContent : '';
     var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
