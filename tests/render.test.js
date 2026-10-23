@@ -2236,5 +2236,57 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     ok( page.errors.length === 0, 'E4B9: no console errors' );
 }() );
 
+// --- E4B7: `\|` is an argument separator, not part of the target ---
+( function () {
+    var base = 'http://wiki.example.test/index.php?title=';
+    var files = {
+        'Map.png': {
+            url: 'http://wiki.example.test/images/Map.png',
+            exists: true
+        }
+    };
+    // MediaWiki authors escape the pipe out of table habit; the backslash
+    // belongs to neither the target nor the argument text.
+    var source = '# Escaped pipes\n\n'
+        + 'See [[Main Page\\|the main page]] and '
+        + '[[File:Map.png\\|alt caption]].\n\n'
+        + '| Cell | Link |\n'
+        + '| --- | --- |\n'
+        + '| one | [[Page\\|label]] |\n';
+    var page = makePage( source, {
+        withHomebrewery: true,
+        wikiBase: base,
+        files: files
+    } );
+    var rendered = renderRoot( page );
+    var link = rendered
+        ? rendered.querySelector( 'a[href="' + base + 'Main_Page"]' )
+        : null;
+    var tableLink = rendered
+        ? rendered.querySelector( 'a[href="' + base + 'Page"]' )
+        : null;
+    var img = rendered ? rendered.querySelector( 'img[alt="alt caption"]' ) : null;
+    var hrefs = [];
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+    var i;
+
+    for ( i = 0; i < links.length; i++ ) {
+        hrefs.push( links[ i ].getAttribute( 'href' ) );
+    }
+
+    ok( !!link && link.textContent === 'the main page',
+        'E4B7: [[Page\\|label]] keeps its label' );
+    ok( hrefs.join( ' ' ).indexOf( 'Main_Page%5C' ) === -1 &&
+        hrefs.join( ' ' ).indexOf( 'Main_Page\\' ) === -1,
+        'E4B7: the separator backslash never reaches the href' );
+    ok( !!img && img.getAttribute( 'src' ) === files[ 'Map.png' ].url,
+        'E4B7: [[File:Name\\|alt]] still resolves the upload' );
+    ok( !!img && img.getAttribute( 'alt' ) === 'alt caption',
+        'E4B7: the escaped separator does not become alt text' );
+    ok( !!tableLink && tableLink.textContent === 'label',
+        'E4B7: an escaped pipe works inside a table cell' );
+    ok( page.errors.length === 0, 'E4B7: no console errors' );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );

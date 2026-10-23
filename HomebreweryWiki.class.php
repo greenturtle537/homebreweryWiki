@@ -476,6 +476,26 @@ class HomebreweryWiki {
 	}
 
 	/**
+	 * Drop the optional `\` of a `\|` argument separator (E4B7).
+	 *
+	 * MediaWiki authors escape the pipe out of table habit, and the renderer
+	 * accepts `[[Page\|label]]` as a link with an argument.  The extracted
+	 * target must lose the backslash too, or the server map keys `Page\`
+	 * while the anchor points at `Page` and a valid link turns red.
+	 *
+	 * @param string $target Token target as captured from source.
+	 * @param bool   $hasSeparator Whether the token had a `|` separator.
+	 * @return string Trimmed target without the separator escape.
+	 */
+	protected static function stripEscapedPipe( $target, $hasSeparator = false ) {
+		$target = trim( $target );
+		if ( $hasSeparator && substr( $target, -1 ) === '\\' ) {
+			$target = substr( $target, 0, -1 );
+		}
+		return $target;
+	}
+
+	/**
 	 * Category names declared in brew source (E3.5S3T4).
 	 *
 	 * `[[Category:Name]]` / `[[Category:Name|sort]]` are source-level tokens:
@@ -492,9 +512,9 @@ class HomebreweryWiki {
 			return $names;
 		}
 		$text = self::brewProseText( $text );
-		if ( preg_match_all( '/\[\[Category:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
-			foreach ( $m[1] as $name ) {
-				$name = trim( $name );
+		if ( preg_match_all( '/\[\[Category:([^\]|]+)(\|[^\]]*)?\]\]/i', $text, $m, PREG_SET_ORDER ) ) {
+			foreach ( $m as $match ) {
+				$name = self::stripEscapedPipe( $match[1], !empty( $match[2] ) );
 				if ( $name !== '' && !isset( $names[$name] ) ) {
 					$names[$name] = true;
 				}
@@ -542,9 +562,9 @@ class HomebreweryWiki {
 			return $targets;
 		}
 		$text = self::brewProseText( $text );
-		if ( preg_match_all( '/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/', $text, $m ) ) {
-			foreach ( $m[1] as $target ) {
-				$target = trim( $target );
+		if ( preg_match_all( '/\[\[([^\]|]+)(\|[^\]]*)?\]\]/', $text, $m, PREG_SET_ORDER ) ) {
+			foreach ( $m as $match ) {
+				$target = self::stripEscapedPipe( $match[1], !empty( $match[2] ) );
 				if ( $target === '' ) {
 					continue;
 				}
@@ -737,11 +757,11 @@ class HomebreweryWiki {
 			return $map;
 		}
 		$text = self::brewProseText( $text );
-		if ( !preg_match_all( '/\[\[File:([^\]|]+)(?:\|[^\]]*)?\]\]/i', $text, $m ) ) {
+		if ( !preg_match_all( '/\[\[File:([^\]|]+)(\|[^\]]*)?\]\]/i', $text, $m, PREG_SET_ORDER ) ) {
 			return $map;
 		}
-		foreach ( $m[1] as $name ) {
-			$name = trim( $name );
+		foreach ( $m as $match ) {
+			$name = self::stripEscapedPipe( $match[1], !empty( $match[2] ) );
 			if ( $name === '' || isset( $map[$name] ) ) {
 				continue;
 			}

@@ -706,9 +706,12 @@
      * Wiki token: `[[Page]]`, `[[Page|label]]`, `[[Category:Name]]`,
      * `[[File:Name.png|alt|caption|size]]` (D8 / E3.5S3T1).
      *
+     * The whole inner text is captured; `splitWikiToken()` does the argument
+     * split so a `\|` separator (the MediaWiki table habit) is understood.
+     *
      * @type {RegExp}
      */
-    var WIKI_TOKEN = /\[\[([^\[\]|]+)((?:\|[^\[\]]*)*)\]\]/g;
+    var WIKI_TOKEN = /\[\[([^\[\]]*)\]\]/g;
 
     /**
      * MediaWiki file options that are never alt text (E3.5S3T3).
@@ -732,15 +735,21 @@
     }
 
     /**
-     * Split a token's `|arg|arg` tail into arguments.
+     * Split a token's inner text into its target and arguments.
      *
-     * @param {string} rest
-     * @return {Array.<string>}
+     * `|` separates.  A single `\` immediately before it is the MediaWiki
+     * table habit (`[[Page\|label]]`) and belongs to neither the target nor
+     * the argument text, so it is dropped with the separator (E4B7).
+     *
+     * @param {string} inner
+     * @return {{target: string, args: Array.<string>}}
      */
-    function wikiArgs( rest ) {
-        var parts = String( rest || '' ).split( '|' );
-        parts.shift();
-        return parts;
+    function splitWikiToken( inner ) {
+        var parts = String( inner || '' ).split( /\\?\|/ );
+        return {
+            target: ( parts.shift() || '' ).replace( /^\s+|\s+$/g, '' ),
+            args: parts
+        };
     }
 
     /**
@@ -873,6 +882,7 @@
         var newline;
         var masked;
         var replaced;
+        var token;
         var last;
         var match;
 
@@ -893,9 +903,11 @@
             WIKI_TOKEN.lastIndex = 0;
             while ( ( match = WIKI_TOKEN.exec( masked ) ) !== null ) {
                 replaced += line.substring( last, match.index );
-                replaced += wikiTokenHtml(
-                    match[ 1 ].replace( /^\s+|\s+$/g, '' ),
-                    wikiArgs( match[ 2 ] ),
+                token = splitWikiToken( match[ 1 ] );
+                // `[[]]` / `[[|label]]` are not tokens; leave the source text.
+                replaced += ( token.target === '' ) ? match[ 0 ] : wikiTokenHtml(
+                    token.target,
+                    token.args,
                     config
                 );
                 last = match.index + match[ 0 ].length;
