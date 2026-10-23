@@ -2288,5 +2288,37 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     ok( page.errors.length === 0, 'E4B7: no console errors' );
 }() );
 
+// --- E4B8: tokens inside inline mustaches stay literal; block mustaches keep links ---
+( function () {
+    var inlineSource = '{{battle|[[Main Page]]}}\n';
+    var inlinePage = makePage( inlineSource, { withHomebrewery: true } );
+    var inlineRendered = renderRoot( inlinePage );
+    var inlineHtml = inlineRendered ? inlineRendered.innerHTML : '';
+
+
+    ok( inlineHtml.indexOf( 'class="inline-block battle|' ) === -1,
+        'E4B8: an inline mustache does not emit broken class markup' );
+    ok( inlineHtml.indexOf( '[[Main Page]]' ) !== -1,
+        'E4B8: the token inside the inline mustache stays literal' );
+    ok( !!inlineRendered && !!inlineRendered.querySelector( 'span.inline-block' ),
+        'E4B8: the inline mustache still renders as a span' );
+    ok( !!inlineRendered && !inlineRendered.querySelector( 'a[href]' ),
+        'E4B8: the inline mustache does not emit a stray anchor' );
+
+    var blockSource = '{{note\n\n[[Main Page]]\n\n}}\n';
+    var blockPage = makePage( blockSource, {
+        withHomebrewery: true,
+        wikiBase: 'http://wiki.example.test/index.php?title='
+    } );
+    var blockRendered = renderRoot( blockPage );
+    var blockHtml = blockRendered ? blockRendered.innerHTML : '';
+
+
+    ok( !!blockRendered && !!blockRendered.querySelector( 'a[href]' ),
+        'E4B8: a block mustache still renders a wiki link' );
+    ok( !!blockRendered && !blockRendered.querySelector( 'pre code' ),
+        'E4B8: the block mustache content is not code' );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );

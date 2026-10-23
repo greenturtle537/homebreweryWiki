@@ -714,6 +714,36 @@
     var WIKI_TOKEN = /\[\[([^\[\]]*)\]\]/g;
 
     /**
+     * Inline mustache (`{{name|…}}`) on one line (E4B8).
+     *
+     * The pinned renderer's `mustacheSpans` rule turns this into a
+     * `<span class="inline-block …">` and parses the body as template text.
+     * A wiki token rewritten to an anchor first looks like template markup to
+     * that parser, so its span is left literal instead of being mangled.
+     * Block mustaches span lines and are not matched here.
+     *
+     * @type {RegExp}
+     */
+    var INLINE_MUSTACHE = /\{\{[^{}\n]*\}\}/g;
+
+    /**
+     * Whether an index falls inside one of the given [start, end) spans.
+     *
+     * @param {number} index
+     * @param {Array.<Array.<number>>} spans
+     * @return {boolean}
+     */
+    function isInsideAnySpan( index, spans ) {
+        var i;
+        for ( i = 0; i < spans.length; i++ ) {
+            if ( index >= spans[ i ][ 0 ] && index < spans[ i ][ 1 ] ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * MediaWiki file options that are never alt text (E3.5S3T3).
      *
      * @type {RegExp}
@@ -874,7 +904,7 @@
      * @param {Object} config `{ base: string, files: Object }`.
      * @return {string}
      */
-    function applyWikiTokens( pageSource, config ) {
+    function applyWikiTokens( pageSource, config, placeholders ) {
         var walker = createProseWalker( pageSource );
         var out = [];
         var step;
@@ -885,6 +915,16 @@
         var token;
         var last;
         var match;
+        var mustache;
+        var lineAfterMustache;
+        var mustacheLast;
+        var mustacheContent;
+        var pipeIndex;
+        var mustacheClass;
+        var mustacheBody;
+        var placeholderId = 0;
+        var placeholderKey;
+        placeholders = placeholders || {};
 
         while ( ( step = walker.next() ) !== null ) {
             newline = step.text.charAt( step.text.length - 1 ) === '\n' ? '\n' : '';
@@ -898,11 +938,38 @@
             // written inside backticks is never rewritten, while offsets still
             // point at the original line (E3B1 rule, applied to wiki tokens).
             masked = maskInlineCode( line );
+            // E4B8: pre-render inline mustaches so the parser cannot mangle
+            // them.  The token inside stays literal.
+            lineAfterMustache = '';
+            mustacheLast = 0;
+            INLINE_MUSTACHE.lastIndex = 0;
+            while ( ( mustache = INLINE_MUSTACHE.exec( masked ) ) !== null ) {
+                lineAfterMustache += line.substring( mustacheLast, mustache.index );
+                // Parse the mustache content.  The syntax is {{class|content}}.
+                mustacheContent = mustache[ 0 ].substring( 2, mustache[ 0 ].length - 2 );
+                pipeIndex = mustacheContent.indexOf( '|' );
+                mustacheClass = pipeIndex === -1 ? mustacheContent : mustacheContent.substring( 0, pipeIndex );
+                mustacheBody = pipeIndex === -1 ? '' : mustacheContent.substring( pipeIndex + 1 );
+                // Generate the span HTML.  The body is left literal.
+                placeholderId++;
+                placeholderKey = 'HBWINLINEMUSTACHE' + placeholderId;
+                placeholders[ placeholderKey ] = '<span class="inline-block ' + escapeHtml( mustacheClass ) + '">' + escapeHtml( mustacheBody ) + '</span>';
+                lineAfterMustache += placeholderKey;
+                mustacheLast = mustache.index + mustache[ 0 ].length;
+            }
+            lineAfterMustache += line.substring( mustacheLast );
+
+            // Placeholder keys change offsets, so mask inline code again on the
+            // rewritten line: a token inside backticks stays literal even when
+            // the line also carries an inline mustache (E3B1 rule).
+            masked = maskInlineCode( lineAfterMustache );
+
+            // Run the token rewriter on the modified line (without mustaches).
             replaced = '';
             last = 0;
             WIKI_TOKEN.lastIndex = 0;
             while ( ( match = WIKI_TOKEN.exec( masked ) ) !== null ) {
-                replaced += line.substring( last, match.index );
+                replaced += lineAfterMustache.substring( last, match.index );
                 token = splitWikiToken( match[ 1 ] );
                 // `[[]]` / `[[|label]]` are not tokens; leave the source text.
                 replaced += ( token.target === '' ) ? match[ 0 ] : wikiTokenHtml(
@@ -912,7 +979,7 @@
                 );
                 last = match.index + match[ 0 ].length;
             }
-            replaced += line.substring( last );
+            replaced += lineAfterMustache.substring( last );
             out.push( replaced + newline );
         }
         return out.join( '' );
@@ -1272,17 +1339,25 @@
         var pageMarked;
         var html;
         var p;
+        var placeholders;
+        var key;
 
         for ( p = 0; p < pages.length; p++ ) {
+            placeholders = {};
             pageMarked = replaceColumnMarkers(
                 markFootnoteRefs(
-                    applyWikiTokens( pages[ p ], wikiConfig ),
+                    applyWikiTokens( pages[ p ], wikiConfig, placeholders ),
                     footnoteNotes
                 )
             );
             html = renderMarkdown( pageMarked, p );
             if ( html === null ) {
                 return null;
+            }
+            for ( key in placeholders ) {
+                if ( Object.prototype.hasOwnProperty.call( placeholders, key ) ) {
+                    html = html.replace( key, placeholders[ key ] );
+                }
             }
             renderedPages.push( resolveSamePageAnchors( html ) );
         }
@@ -1501,9 +1576,17 @@
             itemNode.className = FOOTNOTE_ITEM_CLASS;
             // Note bodies are prose too: expand wiki tokens before rendering
             // so the footnote agrees with the link tables the save hook wrote.
-            itemNode.innerHTML = renderMarkdown(
-                applyWikiTokens( notes[ label ], wikiConfig ), 0
+            var notePlaceholders = {};
+            var noteHtml = renderMarkdown(
+                applyWikiTokens( notes[ label ], wikiConfig, notePlaceholders ), 0
             ) || '';
+            var noteKey;
+            for ( noteKey in notePlaceholders ) {
+                if ( Object.prototype.hasOwnProperty.call( notePlaceholders, noteKey ) ) {
+                    noteHtml = noteHtml.replace( noteKey, notePlaceholders[ noteKey ] );
+                }
+            }
+            itemNode.innerHTML = noteHtml;
             backLink = doc.createElement( 'a' );
             backLink.setAttribute( 'href', '#hbw-fnref-' + pageNumber + '-' + encodeURIComponent( label ) );
             backLink.className = FOOTNOTE_BACK_CLASS;
