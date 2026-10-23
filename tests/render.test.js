@@ -2219,6 +2219,23 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     } );
 }() );
 
+// --- E4B9: a URL in a missing-file placeholder is inert ---
+( function () {
+    var source = '[[File:https://example.test/x.png]]\n';
+    var page = makePage( source, { withHomebrewery: true } );
+    var rendered = renderRoot( page );
+    var text = rendered ? rendered.textContent : '';
+    var links = rendered ? rendered.querySelectorAll( 'a' ) : [];
+
+    ok( !!rendered && !!rendered.querySelector( '.hbw-missing-file' ),
+        'E4B9: a URL file token renders the placeholder' );
+    ok( !!rendered && text.indexOf( 'https://example.test/x.png' ) !== -1,
+        'E4B9: the placeholder shows the URL text' );
+    ok( links.length === 0,
+        'E4B9: the placeholder does not autolink the URL' );
+    ok( page.errors.length === 0, 'E4B9: no console errors' );
+}() );
+
 // --- E4B7: `\|` is an argument separator, not part of the target ---
 ( function () {
     var base = 'http://wiki.example.test/index.php?title=';
