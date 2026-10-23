@@ -2288,5 +2288,66 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
     ok( page.errors.length === 0, 'E4B7: no console errors' );
 }() );
 
+// --- E4B8: tokens inside inline mustaches stay literal; block mustaches keep links ---
+( function () {
+    var inlineSource = '{{battle|[[Main Page]]}}\n';
+    var inlinePage = makePage( inlineSource, { withHomebrewery: true } );
+    var inlineRendered = renderRoot( inlinePage );
+    var inlineHtml = inlineRendered ? inlineRendered.innerHTML : '';
+
+
+    ok( inlineHtml.indexOf( 'class="inline-block battle|' ) === -1,
+        'E4B8: an inline mustache does not emit broken class markup' );
+    ok( inlineHtml.indexOf( '[[Main Page]]' ) !== -1,
+        'E4B8: the token inside the inline mustache stays literal' );
+    ok( !!inlineRendered && !!inlineRendered.querySelector( 'span.inline-block' ),
+        'E4B8: the inline mustache still renders as a span' );
+    ok( !!inlineRendered && !inlineRendered.querySelector( 'a[href]' ),
+        'E4B8: the inline mustache does not emit a stray anchor' );
+
+    var blockSource = '{{note\n\n[[Main Page]]\n\n}}\n';
+    var blockPage = makePage( blockSource, {
+        withHomebrewery: true,
+        wikiBase: 'http://wiki.example.test/index.php?title='
+    } );
+    var blockRendered = renderRoot( blockPage );
+    var blockHtml = blockRendered ? blockRendered.innerHTML : '';
+
+
+    ok( !!blockRendered && !!blockRendered.querySelector( 'a[href]' ),
+        'E4B8: a block mustache still renders a wiki link' );
+    ok( !!blockRendered && !blockRendered.querySelector( 'pre code' ),
+        'E4B8: the block mustache content is not code' );
+
+    // Review fix: the body is read from the original line, not the masked
+    // copy, so inline code inside the body keeps its real text.
+    var codeSource = '{{note|`code`}}\n';
+    var codePage = makePage( codeSource, { withHomebrewery: true } );
+    var codeRendered = renderRoot( codePage );
+    var codeSpan = codeRendered ? codeRendered.querySelector( 'span.inline-block' ) : null;
+    ok( !!codeSpan,
+        'E4B8: a mustache body with inline code still renders as a span' );
+    ok( !!codeSpan && codeSpan.textContent.indexOf( '`code`' ) !== -1,
+        'E4B8: inline code in a mustache body stays literal' );
+    ok( !!codeSpan && codeSpan.textContent.indexOf( '\u0000' ) === -1,
+        'E4B8: inline code in a mustache body is not mask filler' );
+
+    // Review fix: restoration is text-node only, so a key that lands in an
+    // attribute is never reparsed into markup or a new attribute.
+    var attrSource = '{{battle|[[Main Page]]}}\n\n'
+        + '<span title="HBWINLINEMUSTACHE1">probe</span>\n';
+    var attrPage = makePage( attrSource, { withHomebrewery: true } );
+    var attrRendered = renderRoot( attrPage );
+    var attrProbe = attrRendered ? attrRendered.querySelector( 'span[title]' ) : null;
+    ok( !!attrProbe,
+        'E4B8: an attribute probe survives sanitizing' );
+    ok( !!attrProbe && attrProbe.getAttribute( 'title' ) === 'HBWINLINEMUSTACHE1',
+        'E4B8: a placeholder key inside an attribute stays literal' );
+    ok( !!attrProbe && attrProbe.children.length === 0,
+        'E4B8: a placeholder key inside an attribute injects no element' );
+    ok( !!attrRendered && attrRendered.querySelectorAll( 'span.inline-block' ).length === 1,
+        'E4B8: only the real mustache becomes a span' );
+}() );
+
 console.log( '\n' + pass + ' passed, ' + fail + ' failed' );
 process.exit( fail > 0 ? 1 : 0 );
