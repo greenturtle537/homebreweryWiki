@@ -36,7 +36,7 @@ no renderer at all still gets the plain-text `<pre>` view.
 
 ## Permissions
 
-The extension applies the account policy from `docs/QUESTIONS.md` Q21 when it
+The extension applies following account policy when it 
 loads (all values can be overridden later in `LocalSettings.php`):
 
 - Anonymous visitors are **read-only**: no `edit`, `createpage`, `createtalk`,
