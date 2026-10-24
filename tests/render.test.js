@@ -2427,12 +2427,22 @@ ok( !/(=>|\bconst\b|\blet\b|\bclass\s)/.test( renderSource ),
         'E4S5: chapter 2 carries the index link' );
     ok( !!ch2Prev && ch2Prev.textContent === '\u2190 Chapter 1 \u2014 The Cellar',
         'E4S5: chapter 2 links back to chapter 1' );
-    ok( !!ch1Index && ch1Index.getAttribute( 'target' ) === '_top' &&
+    ok( !!indexChapter1 && indexChapter1.getAttribute( 'target' ) === '_top' &&
+        !!indexChapter2 && indexChapter2.getAttribute( 'target' ) === '_top' &&
+        !!ch1Index && ch1Index.getAttribute( 'target' ) === '_top' &&
+        !!ch1Next && ch1Next.getAttribute( 'target' ) === '_top' &&
+        !!ch2Index && ch2Index.getAttribute( 'target' ) === '_top' &&
         !!ch2Prev && ch2Prev.getAttribute( 'target' ) === '_top',
-        'E4S5: navigation links navigate the parent page' );
-    ok( !!roots.chapter1 &&
-        roots.chapter1.textContent.indexOf( '\u2190 Index \u00b7 Chapter 2' ) !== -1,
-        'E4S5: the navigation line keeps the documented separator' );
+        'E4S5: every navigation link navigates the parent page' );
+
+    // The separator must be text, not a third clickable link.
+    var separator = ch1Index ? ch1Index.nextSibling : null;
+    ok( !!separator && separator.nodeType === 3 &&
+        separator.nodeValue.indexOf( ' \u00b7 ' ) !== -1,
+        'E4S5: the separator between navigation links is plain text' );
+    ok( !!separator && separator.nextSibling &&
+        separator.nextSibling.nodeName.toLowerCase() === 'a',
+        'E4S5: the text separator sits directly between the two links' );
     ok( pages.index.errors.length === 0 && pages.chapter1.errors.length === 0 &&
         pages.chapter2.errors.length === 0,
         'E4S5: no console errors' );
