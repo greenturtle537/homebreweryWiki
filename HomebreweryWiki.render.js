@@ -2057,11 +2057,12 @@
      * Fit the page stack to the pane (E3.5S4T1/T2).
      *
      * Pages stay true letter size inside the iframe; the parent writes a
-     * scale rule into the frame and sizes the frame from the scaled page
-     * stack. The page stack is centred in the pane: a wide pane keeps the
-     * letter sheet in the middle instead of pinning it to the left edge, and
-     * a narrow pane scales it around the same centre line. The print route
-     * skips scaling so each page prints as a real letter sheet.
+     * layout rule into the frame and sizes the frame from the resulting
+     * page stack. On a wide desktop pane two letter sheets sit side by side
+     * (grid, row-major); below that - a laptop or a phone - the pages stay
+     * in one stacked column. The stack is centred on the pane's centre line
+     * and scales around it. The print route skips scaling so each page
+     * prints as a real letter sheet.
      *
      * @param {HTMLElement} frame
      * @param {HTMLElement} pagesNode
@@ -2073,7 +2074,15 @@
         var pageWidth = mmToPx( PAGE_WIDTH_MM );
         var available = host.clientWidth || frame.clientWidth || pageWidth;
         var printMode = host.getAttribute( 'data-hbw-print' ) === '1';
-        var scale = printMode ? 1 : Math.min( 1, available / pageWidth );
+        // Two sheets fit only on a wide desktop pane: 2 x 215.9mm plus the
+        // 16px gutter needs 1648px. A narrower pane - laptop or phone -
+        // keeps the single stacked column, so mobile stays one above the
+        // other without a separate breakpoint.
+        var pageGap = 16;
+        var columns = ( !printMode &&
+            available >= pageWidth * 2 + pageGap ) ? 2 : 1;
+        var layoutWidth = columns * pageWidth + ( columns - 1 ) * pageGap;
+        var scale = printMode ? 1 : Math.min( 1, available / layoutWidth );
         var style = doc.getElementById( 'hbw-fit' );
         var css;
         var height;
@@ -2088,16 +2097,27 @@
         }
 
         // Centre the stack on the pane's centre line. `margin: 0 auto` cannot
-        // do it: when the pane is narrower than the letter width the auto
-        // margins collapse to zero, so a wide sheet would stay left-aligned.
-        // The relative offset plus half the sheet width keeps the box centred
-        // at every width, and the top-centre origin keeps the scaled sheet on
+        // do it: when the pane is narrower than the sheet the auto margins
+        // collapse to zero, so a wide sheet would stay left-aligned. The
+        // relative offset plus half the layout width keeps the box centred at
+        // every width, and the top-centre origin keeps the scaled sheets on
         // that same centre line.
-        css = '.pages{width:' + pageWidth + 'px;position:relative;left:50%;' +
-            'margin-left:-' + Math.round( pageWidth / 2 ) + 'px;' +
-            'transform:scale(' + scale + ');transform-origin:top center;}';
         if ( printMode ) {
-            css += '.page{margin:0;}';
+            css = '.pages{width:' + Math.round( pageWidth ) + 'px;display:block;' +
+                'position:relative;left:50%;' +
+                'margin-left:-' + Math.round( pageWidth / 2 ) + 'px;' +
+                'transform:scale(1);transform-origin:top center;}' +
+                '.page{margin:0;}';
+        } else {
+            css = '.pages{width:' + Math.round( layoutWidth ) + 'px;' +
+                'display:grid;' +
+                'grid-template-columns:repeat(' + columns + ',' +
+                pageWidth + 'px);gap:' + pageGap + 'px;' +
+                'justify-content:center;' +
+                'position:relative;left:50%;' +
+                'margin-left:-' + Math.round( layoutWidth / 2 ) + 'px;' +
+                'transform:scale(' + scale + ');transform-origin:top center;}' +
+                '.page{margin:0;}';
         }
         style.appendChild( doc.createTextNode( css ) );
 
@@ -2107,6 +2127,7 @@
         frame.style.width = printMode ? pageWidth + 'px' : '100%';
         frame.style.height = height + 'px';
         frame.setAttribute( 'data-hbw-scale', String( scale ) );
+        frame.setAttribute( 'data-hbw-columns', String( columns ) );
 
         // Column overflow is a layout fact, so it is measured on every refit:
         // the theme stylesheet and the fonts arrive after the first pass and

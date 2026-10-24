@@ -1784,6 +1784,8 @@ function offOriginFetches( win, root ) {
         'fit: page stack is centred in the pane' );
     ok( !!frame && frame.getAttribute( 'data-hbw-scale' ) !== null,
         'fit: frame reports data-hbw-scale' );
+    ok( !!frame && frame.getAttribute( 'data-hbw-columns' ) === '1',
+        'fit: a normal host keeps one column' );
     ok( !isNaN( scale ) && Math.abs( scale - 1 ) < 0.01,
         'fit: wide host uses scale 1 (got ' + scale + ')' );
     ok( height > 0, 'fit: frame height follows the page stack (got ' + height + ')' );
@@ -1811,6 +1813,30 @@ function offOriginFetches( win, root ) {
         'fit narrow: frame height is roughly half the natural stack' );
     ok( widePage.errors.length === 0 && narrowPage.errors.length === 0,
         'fit narrow: no console errors' );
+}() );
+
+// --- E4B12: two letter sheets sit side by side on a wide desktop pane ---
+( function () {
+    var source = '# Two-up\n\nbody text\n';
+    var page = makePage( source, { clientWidth: 1700 } );
+    var frame = frameOf( page );
+    var doc = frameDocOf( page );
+    var style = doc ? doc.getElementById( 'hbw-fit' ) : null;
+    var css = style ? style.textContent : '';
+    var columns = frame ? frame.getAttribute( 'data-hbw-columns' ) : null;
+    var scale = frame ? parseFloat( frame.getAttribute( 'data-hbw-scale' ) ) : NaN;
+
+    ok( columns === '2', 'fit two-up: wide pane reports two columns (got ' +
+        columns + ')' );
+    ok( css.indexOf( 'grid-template-columns:repeat(2,' ) !== -1,
+        'fit two-up: grid has two letter columns' );
+    ok( css.indexOf( 'width:1648px' ) !== -1,
+        'fit two-up: layout width is two sheets plus the gutter' );
+    ok( css.indexOf( '.page{margin:0;}' ) !== -1,
+        'fit two-up: the grid gap owns the spacing' );
+    ok( !isNaN( scale ) && Math.abs( scale - 1 ) < 0.01,
+        'fit two-up: natural size when both sheets fit (got ' + scale + ')' );
+    ok( page.errors.length === 0, 'fit two-up: no console errors' );
 }() );
 
 // --- E3.5S4 T3/T4: print route is unscaled and triggers window.print ---
