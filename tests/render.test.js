@@ -868,12 +868,15 @@ function offOriginFetches( win, root ) {
     // E3.5S4 print isolation is the one documented exception: it only runs in
     // @media print on the print route and hides wiki chrome around the host.
     var printOnly = /^\s*body\.hbw-print-mode\b/;
+    // E4B10 MonoBook sidebar repair: #column-content is an ancestor of the
+    // host, so the rule cannot be scoped under .hbw-brew.
+    var compatOnly = /^\s*body\s+#column-content\s*$/;
     var i;
     var leakedAtRule;
 
     for ( i = 0; i < selectors.length; i++ ) {
         if ( selectors[ i ] && selectors[ i ].indexOf( '.hbw-brew' ) !== 0 &&
-            !printOnly.test( selectors[ i ] ) ) {
+            !printOnly.test( selectors[ i ] ) && !compatOnly.test( selectors[ i ] ) ) {
             unscoped.push( selectors[ i ] );
         }
         if ( bare.test( selectors[ i ] ) ) {
@@ -894,11 +897,15 @@ function offOriginFetches( win, root ) {
     ok( selectors.length > 0, 'theme: stylesheet has rules' );
     ok( themeSource.indexOf( '.hbw-brew .hbw-frame' ) !== -1,
         'theme: parent stylesheet sizes the iframe host' );
-    // Ids are allowed only inside the print-mode isolation rules (E3.5S4).
+    ok( themeSource.indexOf( 'body #column-content' ) !== -1,
+        'theme: restores MonoBook sidebar geometry (E4B10)' );
+    // Ids are allowed only inside the print-mode isolation rules (E3.5S4)
+    // and the documented MonoBook sidebar repair (E4B10).
     var idRules = themeSource.match( /[^{}]*#[^{}]*\{[^}]*\}/g ) || [];
     ok( idRules.every( function ( rule ) {
-        return rule.indexOf( 'hbw-print-mode' ) !== -1;
-    } ), 'theme: ids appear only in print-mode isolation rules' );
+        return rule.indexOf( 'hbw-print-mode' ) !== -1 ||
+            rule.indexOf( '#column-content' ) !== -1;
+    } ), 'theme: ids appear only in documented isolation/compat rules' );
 }() );
 
 // --- E3B5 / E3.5S5: the old side-by-side harness is retired ---

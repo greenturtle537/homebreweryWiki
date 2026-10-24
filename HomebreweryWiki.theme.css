@@ -18,7 +18,7 @@
 .hbw-brew .hbw-frame {
     display: block;
     width: 100%;
-    min-height: 0;
+    min-height: 400px;
     border: 0;
     margin: 0;
     padding: 0;
@@ -78,4 +78,37 @@
     .hbw-brew .hbw-overflow-notice {
         display: none !important;
     }
+}
+
+/* MonoBook 1.14 sidebar repair (E4B10).
+ *
+ * `skins/common/wikibits.js` injects `skins/monobook/KHTMLFixes.css` whenever
+ * its `is_khtml` probe is true:
+ *
+ *     navigator.vendor == 'KDE' ||
+ *     ( document.childNodes && !document.all && !navigator.taintEnabled )
+ *
+ * On modern engines that misdetects: `document.all` is the spec-mandated
+ * falsy object and `navigator.taintEnabled` no longer exists, so every
+ * Chromium/Gecko/Firefox page gets the "KHTML fix". That file is:
+ *
+ *     #column-content { margin-left: 0; }
+ *
+ * and it undoes MonoBook's ordered-floats layout, which needs the negative
+ * margin so the 12.2em left strip stays free:
+ *
+ *     #column-content { float: right; width: 100%; margin: 0 0 .6em -12.2em; }
+ *
+ * Without the strip, the generated-sidebar portlets (`#p-navigation`,
+ * `#p-search`, `#p-tb`) are block formatting contexts that cannot overlap the
+ * full-width right float, so they drop below the content. A short page hides
+ * that; a tall brew pushes them to the bottom of the page.
+ *
+ * `#column-content` is an ancestor of the host, so the rule cannot be scoped
+ * under `.hbw-brew`; the type selector raises specificity above KHTMLFixes
+ * (which has no `!important`) without needing one. Harmless on skins that do
+ * not use `#column-content`.
+ */
+body #column-content {
+    margin-left: -12.2em;
 }

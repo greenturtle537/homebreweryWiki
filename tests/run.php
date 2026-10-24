@@ -348,6 +348,8 @@ t_assert( strpos( $themeCss, '#hbw-brew-rendered' ) === false,
     'E3S2 styles: no id selector; scoping is by wrapper class' );
 t_assert( strpos( $themeCss, '.hbw-brew .hbw-frame' ) !== false,
     'E3.5 styles: parent stylesheet sizes the iframe render host' );
+t_assert( strpos( $themeCss, 'body #column-content' ) !== false,
+    'E4B10 styles: MonoBook sidebar geometry is restored on brew pages' );
 // --- E3.5S2: compiled upstream theme + asset manifest ---
 t_assert( HomebreweryWiki::themeCssUrl() === '/extensions/HomebreweryWiki/vendor/homebrewery-3.21.0/theme/theme.css',
     'E3.5S2 theme: default theme URL points at the compiled artifact' );
@@ -426,7 +428,11 @@ foreach ( $selectors as $one ) {
     // E3.5S4 print isolation is the documented exception: these rules run
     // only on the print route and hide the wiki chrome around the brew host.
     $printOnly = preg_match( '/^\s*body\.hbw-print-mode\b/', $one );
-    if ( strpos( $one, '.hbw-brew' ) !== 0 && !$printOnly ) {
+    // E4B10 MonoBook sidebar repair is the other documented exception:
+    // #column-content is an ancestor of the host, so it cannot be scoped
+    // under .hbw-brew.
+    $compatOnly = preg_match( '/^\s*body\s+#column-content\s*$/', $one );
+    if ( strpos( $one, '.hbw-brew' ) !== 0 && !$printOnly && !$compatOnly ) {
         $unscoped[] = $one;
     }
 }
