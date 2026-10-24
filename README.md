@@ -1,5 +1,7 @@
 # HomebreweryWiki (MediaWiki extension)
 
+[Installation](#installation) · [Permissions](#permissions) · [Build & test](#build--test) · [Visual regression](#visual-regression) · [CI](#ci)
+
 MediaWiki using the Homebrewery Renderer; for large-scale community homebrew projects.
 
 ## Target platform
