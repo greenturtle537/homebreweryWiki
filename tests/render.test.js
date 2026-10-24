@@ -1777,8 +1777,11 @@ function offOriginFetches( win, root ) {
     ok( !!widthMatch && Math.abs( parseFloat( widthMatch[ 1 ] ) - 816 ) < 1,
         'fit: .pages keeps the true letter width' );
     ok( !!style && style.textContent.indexOf( 'transform:scale(' ) !== -1 &&
-        style.textContent.indexOf( 'transform-origin:top left' ) !== -1,
-        'fit: rule scales from the top-left corner' );
+        style.textContent.indexOf( 'transform-origin:top center' ) !== -1,
+        'fit: rule scales from the top centre' );
+    ok( !!style && style.textContent.indexOf( 'left:50%' ) !== -1 &&
+        style.textContent.indexOf( 'margin-left:-408px' ) !== -1,
+        'fit: page stack is centred in the pane' );
     ok( !!frame && frame.getAttribute( 'data-hbw-scale' ) !== null,
         'fit: frame reports data-hbw-scale' );
     ok( !isNaN( scale ) && Math.abs( scale - 1 ) < 0.01,
